@@ -1,34 +1,23 @@
 // =====================================================
-// Control 2 Motores DC con 2 Encoders JGB37-3530
-// 2 PID independientes - ESP32
-// Drivers: 2x IBT-4 (cada motor usa IN1/IN2)
+// Control 23 Motores DC con 3 Encoders JGB37-3530
+// 3 PID independientes - ESP32 der
+// Drivers: IBT-4 (cada motor usa IN1/IN2)
 // =====================================================
 
-// -------------------- Pines IBT-4 --------------------
-// Motor Izquierdo (LEFT)
-#define L_IN1 25   // PWM Forward
-#define L_IN2 26   // PWM Reverse
-
-// Motor Derecho (RIGHT)
-#define R_IN1 27   // PWM Forward
-#define R_IN2 14   // PWM Reverse  (ejemplo; cambia si lo necesitas)
+// Motores
+#define IN1 27   // PWM Forward
+#define IN2 14   // PWM Reverse  (ejemplo; cambia si lo necesitas)
 
 // -------------------- Pines Encoders -----------------
-// Encoder Izquierdo
-#define L_ENC_A 18
-#define L_ENC_B 19
 
-// Encoder Derecho
-#define R_ENC_A 32
-#define R_ENC_B 33
+// Encoders
+#define ENC_A 32
+#define ENC_B 33
 
 // -------------------- PWM ESP32 ----------------------
 #define PWM_FREQ 20000
 #define PWM_RESOLUTION 10
 const int PWM_MAX = (1 << PWM_RESOLUTION) - 1;  // 255 si RES=8
-
-// Entrada externa (ejemplo)
-#define RASP_INPUT 4   // cambié a 4 porque 32/33 ya se usan; ajusta a tu caso
 
 // -------------------- Parámetros motor/encoder --------
 const float PWM_MIN = 20.0;   // % mínimo donde el motor gira
@@ -40,10 +29,8 @@ const unsigned long SAMPLE_MS = 100;
 
 // -------------------- PID (Ganancias) ----------------
 // Puedes dejarlas iguales o ajustarlas por separado
-float Kp_L = 0.0, Ki_L = 1.0, Kd_L = 0.0;
 float Kp_R = 0.0, Ki_R = 1.0, Kd_R = 0.0;
 
-const float INTEGRAL_MAX_L = 200.0;
 const float INTEGRAL_MAX_R = 200.0;
 
 // -------------------- Estados por motor ----------------
@@ -58,10 +45,9 @@ struct PIDState {
   float pidOutput   = 0.0;   // 0..100%
   float pwmPercent  = 0.0;   // 0..100%
 
-  bool  direction   = true;  // true=forward, false=reverse
+  bool  direction   = false;  // true=forward, false=reverse
 };
 
-PIDState leftMotor;
 PIDState rightMotor;
 
 // -------------------- Ticks encoders ------------------
@@ -71,35 +57,18 @@ volatile long ticksR = 0;
 unsigned long lastSampleTime = 0;
 
 // =====================================================
-// ISR Encoder LEFT (x4)
-// =====================================================
-void IRAM_ATTR ISR_L_A() {
-  bool A = digitalRead(L_ENC_A);
-  bool B = digitalRead(L_ENC_B);
-  if (A == B) ticksL--;
-  else        ticksL++;
-}
-
-void IRAM_ATTR ISR_L_B() {
-  bool A = digitalRead(L_ENC_A);
-  bool B = digitalRead(L_ENC_B);
-  if (A != B) ticksL--;
-  else        ticksL++;
-}
-
-// =====================================================
 // ISR Encoder RIGHT (x4)
 // =====================================================
 void IRAM_ATTR ISR_R_A() {
-  bool A = digitalRead(R_ENC_A);
-  bool B = digitalRead(R_ENC_B);
+  bool A = digitalRead(ENC_A);
+  bool B = digitalRead(ENC_B);
   if (A == B) ticksR--;
   else        ticksR++;
 }
 
 void IRAM_ATTR ISR_R_B() {
-  bool A = digitalRead(R_ENC_A);
-  bool B = digitalRead(R_ENC_B);
+  bool A = digitalRead(ENC_A);
+  bool B = digitalRead(ENC_B);
   if (A != B) ticksR--;
   else        ticksR++;
 }
@@ -186,8 +155,7 @@ void handleCommand(String cmd) {
     float newSetpoint = constrain(sStr.toFloat(), 0.0, 67.0);
     
     // Actualiza AMBOS motores con el mismo setpoint
-    if (abs(newSetpoint - leftMotor.setpointRPM) > 0.1) {
-      leftMotor.setpointRPM = newSetpoint;
+    if (abs(newSetpoint - rightMotor.setpointRPM) > 0.1) {
       rightMotor.setpointRPM = newSetpoint;
     }
   }
@@ -201,8 +169,7 @@ void handleCommand(String cmd) {
     bool newDir = (dirValue == 1);
     
     // Actualiza AMBOS motores con la misma dirección
-    if (newDir != leftMotor.direction) {
-      leftMotor.direction = newDir;
+    if (newDir != rightMotor.direction) {
       rightMotor.direction = newDir;
     }
   }
@@ -216,31 +183,23 @@ void setup() {
   delay(500);
 
   // PWM attach (Core 3.x: ledcAttach(pin,freq,res))
-  ledcAttach(L_IN1, PWM_FREQ, PWM_RESOLUTION);
-  ledcAttach(L_IN2, PWM_FREQ, PWM_RESOLUTION);
-  ledcAttach(R_IN1, PWM_FREQ, PWM_RESOLUTION);
-  ledcAttach(R_IN2, PWM_FREQ, PWM_RESOLUTION);
+  ledcAttach(IN1, PWM_FREQ, PWM_RESOLUTION);
+  ledcAttach(IN2, PWM_FREQ, PWM_RESOLUTION);
 
-  ledcWrite(L_IN1, 0); ledcWrite(L_IN2, 0);
-  ledcWrite(R_IN1, 0); ledcWrite(R_IN2, 0);
+  ledcWrite(IN1, 0); ledcWrite(IN2, 0);
 
   // Encoder pins
-  pinMode(L_ENC_A, INPUT_PULLUP);
-  pinMode(L_ENC_B, INPUT_PULLUP);
-  pinMode(R_ENC_A, INPUT_PULLUP);
-  pinMode(R_ENC_B, INPUT_PULLUP);
+  pinMode(ENC_A, INPUT_PULLUP);
+  pinMode(ENC_B, INPUT_PULLUP);
 
   // Entrada externa
   pinMode(RASP_INPUT, INPUT_PULLDOWN);
 
   // Interrupts encoders
-  attachInterrupt(digitalPinToInterrupt(L_ENC_A), ISR_L_A, CHANGE);
-  attachInterrupt(digitalPinToInterrupt(L_ENC_B), ISR_L_B, CHANGE);
-  attachInterrupt(digitalPinToInterrupt(R_ENC_A), ISR_R_A, CHANGE);
-  attachInterrupt(digitalPinToInterrupt(R_ENC_B), ISR_R_B, CHANGE);
+  attachInterrupt(digitalPinToInterrupt(ENC_A), ISR_R_A, CHANGE);
+  attachInterrupt(digitalPinToInterrupt(ENC_B), ISR_R_B, CHANGE);
 
   // Direcciones iniciales (ajusta)
-  leftMotor.direction  = true;
   rightMotor.direction = true;
 
   lastSampleTime = millis();
@@ -250,60 +209,45 @@ void setup() {
 // Loop
 // =====================================================
 void loop() {
-//  // Ejemplo: mismo setpoint para ambos motores desde una entrada
-//  if (digitalRead(RASP_INPUT) == HIGH) {
-//    leftMotor.setpointRPM  = 45;
-//    rightMotor.setpointRPM = 45;
-//  } else {
-//    leftMotor.setpointRPM  = 0;
-//    rightMotor.setpointRPM = 0;
-//  }
 
-  // Procesa entrada serial
-  while (Serial.available()) {
-    char c = (char)Serial.read();
-    
-    if (c == '\n' || c == '\r') {
-      if (inputBuffer.length() > 0) {
-        handleCommand(inputBuffer);
-        inputBuffer = "";
-      }
-    } else {
-      inputBuffer += c;
-    }
-  }
+
+//  // Procesa entrada serial
+//  while (Serial.available()) {
+//    char c = (char)Serial.read();
+//    
+//    if (c == '\n' || c == '\r') {
+//      if (inputBuffer.length() > 0) {
+//        handleCommand(inputBuffer);
+//        inputBuffer = "";
+//      }
+//    } else {
+//      inputBuffer += c;
+//    }
+//  }
 
   unsigned long now = millis();
   if (now - lastSampleTime >= SAMPLE_MS) {
 
     // Lee ambos encoders de forma atómica
     portDISABLE_INTERRUPTS();
-    long tL = ticksL; ticksL = 0;
     long tR = ticksR; ticksR = 0;
     portENABLE_INTERRUPTS();
 
     float dt = (now - lastSampleTime) / 1000.0;
 
     // RPM por motor
-    leftMotor.currentRPM  = calcularRPM(tL, dt);
     rightMotor.currentRPM = calcularRPM(tR, dt);
 
     // PID independiente
-    leftMotor.pwmPercent  = computePID(leftMotor,  dt, Kp_L, Ki_L, Kd_L, INTEGRAL_MAX_L);
     rightMotor.pwmPercent = computePID(rightMotor, dt, Kp_R, Ki_R, Kd_R, INTEGRAL_MAX_R);
 
     // Aplicar PWM a cada IBT-4
-    setMotorPins(L_IN1, L_IN2, leftMotor.pwmPercent,  leftMotor.direction);
-    setMotorPins(R_IN1, R_IN2, rightMotor.pwmPercent, rightMotor.direction);
+    setMotorPins(IN1, IN2, rightMotor.pwmPercent, rightMotor.direction);
 
     // Serial Plotter (una sola línea)
-    Serial.print("SP_L:");   Serial.print(leftMotor.setpointRPM, 2);
-    Serial.print(" PV_L:");  Serial.print(leftMotor.currentRPM, 2);
-//    Serial.print(" PWM_L:"); Serial.print(leftMotor.pwmPercent, 1);
-
     Serial.print(" SP_R:");  Serial.print(rightMotor.setpointRPM, 2);
     Serial.print(" PV_R:");  Serial.print(rightMotor.currentRPM, 2);
-//    Serial.print(" PWM_R:"); Serial.println(rightMotor.pwmPercent, 1);
+    Serial.print(" PWM_R:"); Serial.println(rightMotor.pwmPercent, 1);
 
     lastSampleTime = now;
   }
