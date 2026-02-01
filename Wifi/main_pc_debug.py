@@ -10,7 +10,7 @@ import cv2 as cv
 import requests
 import time
 
-PI_IP = "172.32.192.88"
+PI_IP = "192.168.1.83"
 
 VIDEO_URL  = f"http://{PI_IP}:5000/video_feed"
 CMD_URL    = f"http://{PI_IP}:5000/command"
