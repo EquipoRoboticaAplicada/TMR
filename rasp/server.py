@@ -1,7 +1,30 @@
 from flask import Flask, Response, request, jsonify
 from video_stream import gen_frames
-from gpiozero import DigitalOutputDevice
+# from gpiozero import DigitalOutputDevice
 import time
+import serial
+
+# ---- UART ESP32 ----
+UART_LEFT  = "/dev/ttyUSB0"
+UART_RIGHT = "/dev/ttyUSB1"
+
+BAUDRATE = 115200
+
+try:
+    ser_left = serial.Serial(UART_LEFT, BAUDRATE, timeout=0.05)
+    ser_right = serial.Serial(UART_RIGHT, BAUDRATE, timeout=0.05)
+    print("UARTs abiertos correctamente")
+except Exception as e:
+    print("Error abriendo UART:", e)
+    ser_left = None
+    ser_right = None
+
+def send_rpm(left_rpm, right_rpm):
+    if ser_left:
+        ser_left.write(f"S{left_rpm:.1f}\n".encode())
+    if ser_right:
+        ser_right.write(f"S{right_rpm:.1f}\n".encode())
+
 
 # ----- GPIO -----
 # 
@@ -14,6 +37,7 @@ import time
 # def signal_off():
 #     IN1.off()
     
+
 # ----- Estado de Visión -----
 
 vision_state = {"colors":[],"centroids":[],"areas":[],"time": 0.0}
@@ -33,10 +57,10 @@ def command():
     data = request.json
     cmd = data.get("cmd")
 
-    if cmd == "signal_on":
-        signal_on()
-    elif cmd == "signal_off":
-        signal_off()
+    # if cmd == "signal_on":
+    #     signal_on()
+    # elif cmd == "signal_off":
+    #     signal_off()
 
     return jsonify({"status": "ok", "cmd": cmd})
 
