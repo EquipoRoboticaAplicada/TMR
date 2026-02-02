@@ -5,7 +5,7 @@
 #
 # Aquí se incluyen funciones para debuggear, transmite a la página y se abre el cuadro de video con bounding boxes y centroides.
 
-from vision import detect_colors
+from vision import detect_colors, crosslines
 import cv2 as cv
 import requests
 import time
@@ -44,8 +44,8 @@ def send_vision_data(colors, centroids, areas):
             json=payload,
             timeout=0.1
         )
-    except:
-        pass
+    except Exception as e:
+        print("Error enviando vision_data:", e)
 
 
 def main():
@@ -89,7 +89,8 @@ def main():
             send_command("signal_off")
             confirmed = True
 
-        cv.imshow("VISION ROVER (PC DEBUG)", frame)
+        video = crosslines(frame.copy())
+        cv.imshow("VISION ROVER (PC DEBUG)", video)
 
         if cv.waitKey(1) & 0xFF == 27:
             break

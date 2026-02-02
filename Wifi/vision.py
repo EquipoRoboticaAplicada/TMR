@@ -64,12 +64,6 @@ def find_and_draw(mask, frame_draw, label, draw=True):
                 
                 x, y, w, h = cv.boundingRect(cnt)
             
-                # # Dibujar bounding box del color detectado
-                # cv.rectangle(frame_draw, (x, y), (x + w, y + h), DRAW[label], 2)
-            
-                # # Texto describiendo el color detectado
-                # cv.putText(frame_draw, label, (x, y - 8), cv.FONT_HERSHEY_SIMPLEX, 0.7, DRAW[label], 2, cv.LINE_AA)
-
                 color_bgr = DRAW.get(label, (255, 255, 255))
                 cv.rectangle(frame_draw, (x, y), (x + w, y + h), color_bgr, 2)
                 cv.putText(frame_draw, label, (x, y - 8), cv.FONT_HERSHEY_SIMPLEX, 0.7, color_bgr, 2, cv.LINE_AA)
@@ -115,3 +109,12 @@ def detect_colors(frame, draw=True):
 
     return colors, centroids, areas
 
+def crosslines(screen):
+    h, w = screen.shape[:2]
+    cx,cy=w//2,h//2
+    cv.line(screen, (cx-50, 0), (cx-50, h), (255,255,255), 1) # left vertical line
+    cv.line(screen, (cx+50, 0), (cx+50, h), (255,255,255), 1) # right vertical line
+
+    cv.line(screen, (0, cy-40), (w, cy-40), (255,255,255), 1) # top horizontal line
+    cv.line(screen, (0, cy+70), (w, cy+70), (255,255,255), 1) # bottom horizontal line
+    return screen
