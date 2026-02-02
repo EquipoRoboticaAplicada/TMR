@@ -5,8 +5,8 @@ import time
 import serial
 
 # ---- UART ESP32 ----
-UART_LEFT  = "/dev/ttyUSB0"
-UART_RIGHT = "/dev/ttyUSB1"
+UART_LEFT  = "/dev/ttyACM0"
+# UART_RIGHT = "/dev/ttyUSB1"
 
 BAUDRATE = 115200
 
@@ -42,6 +42,9 @@ def send_rpm(left_rpm, right_rpm):
 
 vision_state = {"colors":[],"centroids":[],"areas":[],"time": 0.0}
 
+# ----- Estado de control -----
+
+control_state = {"colors":[],"centroids":[],"areas":[],"time": 0.0}
 
 # ----- Flask -----
 app = Flask(__name__)
