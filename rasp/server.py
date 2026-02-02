@@ -4,20 +4,19 @@ from gpiozero import DigitalOutputDevice
 import time
 
 # ----- GPIO -----
-
-IN1 = DigitalOutputDevice(23)
-
-def signal_on():
-    IN1.on()
-    
-
-def signal_off():
-    IN1.off()
+# 
+# IN1 = DigitalOutputDevice(23)
+# 
+# def signal_on():
+#     IN1.on()
+#     
+# 
+# def signal_off():
+#     IN1.off()
     
 # ----- Estado de Visión -----
 
 vision_state = {"colors":[],"centroids":[],"areas":[],"time": 0.0}
-
 
 
 # ----- Flask -----
@@ -55,5 +54,5 @@ def vision_data():
     
 
 if __name__ == "__main__":
-    signal_off()
     app.run(host="0.0.0.0", port=5000,threaded=True)
+    vision_data()
