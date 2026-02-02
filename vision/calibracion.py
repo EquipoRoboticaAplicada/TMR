@@ -14,7 +14,7 @@ TOL_V=40
 COLORS=["red","blue","green"]
 WINDOW_NAME="Color_Calibration"
 
-cap=cv.VideoCapture(0)
+cap=cv.VideoCapture(1)
 
 if not cap.isOpened():
     print("No se pudo abrir la cámara")

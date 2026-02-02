@@ -64,7 +64,7 @@ def main():
     while True:
         ret, frame = cap.read()
         if not ret:
-            print("rame no recibido")
+            print("Frame no recibido")
             break
 
         colors, centroids, areas = detect_colors(frame, draw=True)
