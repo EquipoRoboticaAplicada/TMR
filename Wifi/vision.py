@@ -7,8 +7,6 @@ import numpy as np
 
 
 # --- Rangos HSV ---
-with open(f"PYTHON\TMR\Wifi\colors.json") as f:
-    RANGES=json.load(f)
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 CONFIG_DIR = os.path.join(BASE_DIR, "config")
@@ -109,7 +107,7 @@ def detect_colors(frame, draw=True):
     blurred = cv.GaussianBlur(frame, (5, 5), 0)
     hsv = cv.cvtColor(blurred, cv.COLOR_BGR2HSV)
 
-    for color, ranges in RANGES.items():
+    for color, ranges in COLOR_RANGES.items():
         lower=np.array(ranges["lower"])
         upper=np.array(ranges["upper"])
         
