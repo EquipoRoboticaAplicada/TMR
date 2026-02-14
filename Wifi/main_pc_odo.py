@@ -1,26 +1,21 @@
-#
-# Este código necesita también del código: vision.py
-#
-# La función es recibir el video de la raspberry y procesarlo con vision, escribir el color que se encontró en la terminal al igual que su centroide y área.
-#
-# Aquí se incluyen funciones para debuggear, transmite a la página y se abre el cuadro de video con bounding boxes y centroides.
-
 from vision import detect_colors, crosslines
 import cv2 as cv
 import requests
 import time
 import threading
+import math
 
-PI_IP = "172.32.236.53"
+# ================= CONFIGURACIÓN =================
+PI_IP = "172.32.236.53"  # <--- Asegúrate que esta sea la IP correcta de la Raspberry
 
-VIDEO_URL  = f"http://{PI_IP}:5000/video_feed"
-CMD_URL    = f"http://{PI_IP}:5000/command"
-VISION_URL = f"http://{PI_IP}:5000/vision_data"
+VIDEO_URL     = f"http://{PI_IP}:5000/video_feed"
+CMD_URL       = f"http://{PI_IP}:5000/command"
+VISION_URL    = f"http://{PI_IP}:5000/vision_data"
+TELEMETRY_URL = f"http://{PI_IP}:5000/telemetry"
 
+# ================= HILOS DE COMUNICACIÓN =================
 
-# ---------------------------
-# Hilo de captura (latest-frame)
-# ---------------------------
+# 1. Hilo de Captura de Video (Existente)
 class FrameGrabber:
     def __init__(self, src, warmup_sec=0.0):
         self.cap = cv.VideoCapture(src)
@@ -31,13 +26,11 @@ class FrameGrabber:
         self.thread = threading.Thread(target=self._run, daemon=True)
 
         if not self.cap.isOpened():
-            raise RuntimeError("No se pudo abrir el stream")
-
-        # opcional: dejar que el buffer se estabilice
+            print("⚠️ No se pudo abrir el stream de video (FrameGrabber)")
+            # No lanzamos error fatal para permitir probar telemetría sin video
+        
         if warmup_sec > 0:
-            t0 = time.time()
-            while time.time() - t0 < warmup_sec:
-                self.cap.read()
+            time.sleep(warmup_sec)
 
     def start(self):
         self.thread.start()
@@ -45,16 +38,17 @@ class FrameGrabber:
 
     def _run(self):
         while not self.stop_event.is_set():
-            ok, f = self.cap.read()
-            if not ok:
-                self.ok = False
-                # evita busy-loop si el stream se corta momentáneamente
-                time.sleep(0.01)
-                continue
-
-            with self.lock:
-                self.frame = f
-                self.ok = True
+            if self.cap.isOpened():
+                ok, f = self.cap.read()
+                if not ok:
+                    self.ok = False
+                    time.sleep(0.01)
+                    continue
+                with self.lock:
+                    self.frame = f
+                    self.ok = True
+            else:
+                time.sleep(0.1)
 
     def read(self):
         with self.lock:
@@ -65,20 +59,18 @@ class FrameGrabber:
     def stop(self):
         self.stop_event.set()
         self.thread.join(timeout=1.0)
-        self.cap.release()
+        if self.cap.isOpened():
+            self.cap.release()
 
-
-# ---------------------------
-# Hilo opcional para envíos HTTP
-# ---------------------------
+# 2. Hilo de Envío de Comandos (Existente)
 class Sender:
     def __init__(self, cmd_url, vision_url):
         self.cmd_url = cmd_url
         self.vision_url = vision_url
         self.session = requests.Session()
         self.lock = threading.Lock()
-        self.latest_cmd = None          # dict
-        self.latest_vision = None       # dict
+        self.latest_cmd = None
+        self.latest_vision = None
         self.stop_event = threading.Event()
         self.thread = threading.Thread(target=self._run, daemon=True)
 
@@ -96,34 +88,66 @@ class Sender:
 
     def _run(self):
         while not self.stop_event.is_set():
-            cmd = None
-            vis = None
+            cmd, vis = None, None
             with self.lock:
                 cmd = self.latest_cmd
                 vis = self.latest_vision
                 self.latest_cmd = None
                 self.latest_vision = None
 
-            # manda lo más reciente, descarta acumulación
             try:
-                if cmd is not None:
+                if cmd:
                     self.session.post(self.cmd_url, json=cmd, timeout=0.2)
-                if vis is not None:
+                if vis:
                     self.session.post(self.vision_url, json=vis, timeout=0.2)
-            except:
-                pass
+            except Exception:
+                pass # Ignorar errores de red para no saturar consola
 
-            time.sleep(0.005)  # reduce CPU, mantiene baja latencia
+            time.sleep(0.01)
 
     def stop(self):
         self.stop_event.set()
         self.thread.join(timeout=1.0)
         self.session.close()
 
+# 3. Hilo de Recepción de Telemetría (NUEVO)
+class TelemetryReceiver:
+    def __init__(self, url):
+        self.url = url
+        self.session = requests.Session()
+        self.lock = threading.Lock()
+        self.data = None
+        self.stop_event = threading.Event()
+        self.thread = threading.Thread(target=self._run, daemon=True)
+        self.last_print = 0
 
-# ---------------------------
-# Utilidades (tu lógica)
-# ---------------------------
+    def start(self):
+        self.thread.start()
+        return self
+
+    def _run(self):
+        while not self.stop_event.is_set():
+            try:
+                resp = self.session.get(self.url, timeout=0.2)
+                if resp.status_code == 200:
+                    json_data = resp.json()
+                    with self.lock:
+                        self.data = json_data.get("rover_state", {})
+            except Exception:
+                pass # Error de conexión momentáneo
+            
+            time.sleep(0.05) # Consultar a 20Hz aprox
+
+    def get_state(self):
+        with self.lock:
+            return self.data
+
+    def stop(self):
+        self.stop_event.set()
+        self.thread.join(timeout=1.0)
+        self.session.close()
+
+# ================= UTILIDADES =================
 def send_rpms(sender, left_rpm, right_rpm, dir_left, dir_right):
     payload = {
         "left_rpm":  f"S{int(left_rpm)}",
@@ -146,144 +170,161 @@ def calc_turn_x(centroid, frame_width, deadband_px=10):
     cx = centroid[1]
     center_x = frame_width / 2
     error_px = cx - center_x
-    if abs(error_px) < deadband_px:
-        return 0.0
+    if abs(error_px) < deadband_px: return 0.0
     error = error_px / (frame_width / 2)
     Kp = 5
-    turn = Kp * error
-    return max(-1.0, min(1.0, turn))
+    return max(-1.0, min(1.0, Kp * error))
 
 def pick_target(centroids, areas, area_min=1500):
-    if not centroids or not areas:
-        return None
+    if not centroids or not areas: return None
     candidates = [(c, a) for c, a in zip(centroids, areas) if a >= area_min]
-    if not candidates:
-        return None
-    centroid, area = max(candidates, key=lambda x: x[1])
-    return centroid, area
+    if not candidates: return None
+    return max(candidates, key=lambda x: x[1]) # Retorna (centroid, area)
 
 def clamp_rpm(rpm, min_rpm=20):
-    if rpm < min_rpm:
-        return 0
-    return int(rpm)
+    return int(rpm) if rpm >= min_rpm else 0
 
-
+# ================= MAIN =================
 def main():
-    # Hilo captura
+    print("🚀 Iniciando Cliente PC (Video + Odometría)...")
+
+    # 1. Iniciar Hilos
     grabber = FrameGrabber(VIDEO_URL).start()
-
-    # Hilo envío (opcional pero recomendado)
     sender = Sender(CMD_URL, VISION_URL).start()
+    telemetry = TelemetryReceiver(TELEMETRY_URL).start()
 
-    # --- Parámetros de estabilidad ---
-    N_ENTER = 5
-    N_EXIT  = 10
-    AREA_MIN = 500
-
+    # Variables de Control
+    tracking = False
     seen_count = 0
     lost_count = 0
-    tracking = False
-
+    mode_rotate = False
+    
+    # Parametros
     CRUISE_RPM = 30
     APPROACH_RPM = 25
-
+    AREA_MIN = 500
+    N_ENTER = 5
+    N_EXIT = 10
+    
     left_rpm, right_rpm = CRUISE_RPM, CRUISE_RPM
     dir_left, dir_right = 1, 1
 
-    VISION_SEND_EVERY = 5
-    COMMAND_SEND_EVERY = 2
-    vision_send_counter = 0
-    command_send_counter = 0
-
-    mode_rotate = False
-    Y_TRIGGER = 0.40
-    Y_HYST = 0.35
-
+    # Timers de envío
+    cmd_timer = 0
+    vis_timer = 0
+    
+    # Loop Principal
     while True:
+        # A. Leer Telemetría (Odometría)
+        odom_state = telemetry.get_state()
+        if odom_state:
+            # Aquí tienes acceso a los datos crudos para tu algoritmo de odometría
+            left_side = odom_state.get("left_side", {})
+            right_side = odom_state.get("right_side", {})
+            
+            # Ejemplo: Imprimir RPM promedio de cada lado
+            motors_l = left_side.get("motors", [])
+            motors_r = right_side.get("motors", [])
+            
+            if motors_l and motors_r:
+                rpm_l_avg = sum(m["rpm"] for m in motors_l) / 3
+                rpm_r_avg = sum(m["rpm"] for m in motors_r) / 3
+                
+                # Imprimir datos para debug (comenta si satura)
+                # print(f"📡 ODOM | L_RPM: {rpm_l_avg:.1f} | R_RPM: {rpm_r_avg:.1f} | Seq: {left_side.get('seq')}")
+
+        # B. Leer Video
         ok, frame = grabber.read()
         if not ok or frame is None:
-            # no bloquea; espera el primer frame real
-            time.sleep(0.005)
+            time.sleep(0.01)
             continue
 
+        # C. Procesamiento de Visión
         colors, centroids, areas = detect_colors(frame, draw=True)
-
         target = pick_target(centroids, areas, area_min=AREA_MIN)
         detected = target is not None
 
         if detected:
             centroid, area = target
-
-        # contadores
-        if detected:
             seen_count += 1
             lost_count = 0
         else:
             lost_count += 1
             seen_count = 0
 
-        # transiciones tracking
-        if (not tracking) and (seen_count >= N_ENTER):
+        # Lógica de estados (Tracking)
+        if not tracking and seen_count >= N_ENTER:
             tracking = True
-
-        if tracking and (lost_count >= N_EXIT):
+            print("🟢 TRACKING ACTIVADO")
+        
+        if tracking and lost_count >= N_EXIT:
             tracking = False
             mode_rotate = False
+            print("🔴 TRACKING PERDIDO")
 
+        # Control de Motores
         if not tracking:
             left_rpm, right_rpm = CRUISE_RPM, CRUISE_RPM
             dir_left, dir_right = 1, 1
-
-        # dentro tracking
-        if tracking and detected:
+        else:
+            # Tracking activo
             h, w = frame.shape[:2]
             cy = centroid[2]
             turn = calc_turn_x(centroid, w)
 
-            if (not mode_rotate) and (cy >= h * Y_TRIGGER):
+            # Histéresis rotación
+            Y_TRIGGER = 0.40
+            Y_HYST = 0.35
+            
+            if not mode_rotate and cy >= h * Y_TRIGGER:
                 mode_rotate = True
-            elif mode_rotate and (cy < h * Y_HYST):
+            elif mode_rotate and cy < h * Y_HYST:
                 mode_rotate = False
 
             if mode_rotate:
                 rot = APPROACH_RPM * abs(turn)
                 if abs(turn) < 0.1:
                     left_rpm, right_rpm = 0, 0
-                    dir_left, dir_right = 1, 1
-                elif turn > 0:
+                elif turn > 0: # Gira derecha
                     left_rpm, right_rpm = rot, rot
                     dir_left, dir_right = 0, 1
-                else:
+                else: # Gira izquierda
                     left_rpm, right_rpm = rot, rot
                     dir_left, dir_right = 1, 0
             else:
                 left_rpm, right_rpm = APPROACH_RPM, APPROACH_RPM
                 dir_left, dir_right = 1, 1
 
-        # envío comandos (no bloquea por requests)
-        left_rpm_c = clamp_rpm(left_rpm, min_rpm=20)
-        right_rpm_c = clamp_rpm(right_rpm, min_rpm=20)
+        # D. Enviar Comandos
+        cmd_timer += 1
+        if cmd_timer >= 2:
+            send_rpms(sender, clamp_rpm(left_rpm), clamp_rpm(right_rpm), dir_left, dir_right)
+            cmd_timer = 0
 
-        command_send_counter += 1
-        if command_send_counter >= COMMAND_SEND_EVERY:
-            send_rpms(sender, left_rpm_c, right_rpm_c, dir_left, dir_right)
-            command_send_counter = 0
-
-        vision_send_counter += 1
-        if vision_send_counter >= VISION_SEND_EVERY:
+        vis_timer += 1
+        if vis_timer >= 5:
             send_vision_data(sender, colors, centroids, areas)
-            vision_send_counter = 0
+            vis_timer = 0
 
+        # E. Mostrar Video
         video = crosslines(frame.copy())
+        
+        # Opcional: Escribir info de odometría en la pantalla
+        if odom_state:
+             cv.putText(video, "ODOM OK", (10, 230), cv.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
+        else:
+             cv.putText(video, "NO ODOM", (10, 230), cv.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
+
         cv.imshow("VISION ROVER (PC DEBUG)", video)
 
         if cv.waitKey(1) & 0xFF == 27:
             break
 
+    # Cleanup
     sender.stop()
     grabber.stop()
+    telemetry.stop()
     cv.destroyAllWindows()
-
 
 if __name__ == "__main__":
     main()
