@@ -243,3 +243,8 @@ void loop() {
     lastSampleTime = now;
   }
 }
+
+//el formato que te di solamente es para un motor, lo que era para pruebas, en realidad vamos a tener 6 motores con sus respectivos encoders y 2 ESP32 (cada una va a controlar 3 motores). Como sugirirías compartir todas esa información para los 6 motores.
+//
+//Formato esperado: ID, seq, dt, t1, r1, t2, r2, t3, r3
+//    Ej: ESP_L,100,50,10,2.5,10,2.5,10,2.5
