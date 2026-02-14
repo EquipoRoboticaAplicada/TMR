@@ -81,17 +81,25 @@ def read_serial_thread(ser_obj):
     """Hilo que escucha constantemente un puerto Serial."""
     while ser_obj and ser_obj.is_open:
         try:
-            if ser_obj.in_waiting > 0:
-                line = ser_obj.readline().decode('utf-8', errors='ignore').strip()
-                if line:
-                    # Intentamos parsear como odometría
-                    if line.startswith("ESP"):
-                        parse_esp_line(line)
-                    # Aquí podrías agregar logs si la ESP manda prints de debug
+            # readline() bloquea hasta recibir '\n' o que expire el timeout
+            raw = ser_obj.readline()
+            if not raw:
+                continue  # timeout sin datos, reintentar
+            
+            line = raw.decode('utf-8', errors='ignore').strip()
+            if not line:
+                continue
+
+            print(f"[RAW SERIAL] {line}")  # ← debug temporal, muy útil
+
+            if line.startswith("ESP"):
+                parse_esp_line(line)
+
+        except serial.SerialException as e:
+            print(f"Error serial (desconexión?): {e}")
+            break
         except Exception as e:
             print(f"Error leyendo serial: {e}")
-            break
-        time.sleep(0.001) # Pequeña pausa para no saturar CPU
 
 def auto_connect_esps():
     """
@@ -106,7 +114,7 @@ def auto_connect_esps():
 
     for port in ports:
         try:
-            s = serial.Serial(port, BAUDRATE, timeout=2.0)
+            s = serial.Serial(port, BAUDRATE, timeout=0.1)
             print(f"Proando {port}...")
             
             # Escuchar brevemente para identificar

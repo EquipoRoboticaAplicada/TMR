@@ -133,6 +133,7 @@ class TelemetryReceiver:
                     json_data = resp.json()
                     with self.lock:
                         self.data = json_data.get("rover_state", {})
+                        print(self.data) # Imprime la telemetría recibida (puedes comentar para no saturar)
             except Exception:
                 pass # Error de conexión momentáneo
             
