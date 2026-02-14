@@ -1,250 +1,273 @@
 // =====================================================
-// Control 1 Motor DC con Encoder JGB37-3530 + PID
-// UART por USB (Serial) desde Raspberry Pi
-// Commands:
-//   D1  -> forward
-//   D0  -> reverse
-//   S20.0 -> setpoint RPM
+// CONTROLADOR 3 MOTORES (ROVER 6WD - Lado Independiente)
 // =====================================================
 
-#define IN1 27
-#define IN2 14
+// !!! IMPORTANTE: CAMBIA ESTO SEGÚN EL LADO !!!
+// Usa "ESP_L" para la izquierda, "ESP_R" para la derecha
+#define DEVICE_ID "ESP_L" 
 
-#define ENC_A 32
-#define ENC_B 33
+// --- DEFINICIÓN DE PINES (Ajusta según tu conexión) ---
+// MOTOR 1
+#define M1_IN1 27
+#define M1_IN2 14
+#define M1_ENC_A 32
+#define M1_ENC_B 33
 
+// MOTOR 2
+#define M2_IN1 25
+#define M2_IN2 26
+#define M2_ENC_A 4
+#define M2_ENC_B 16 // Ojo: RX2 suele ser 16, revisa tu board
+
+// MOTOR 3
+#define M3_IN1 18
+#define M3_IN2 19
+#define M3_ENC_A 21
+#define M3_ENC_B 22
+
+// --- CONFIGURACIÓN PWM ---
 #define PWM_FREQ 20000
-#define PWM_RESOLUTION 10
-const int PWM_MAX = (1 << PWM_RESOLUTION) - 1;
+#define PWM_RES 10
+#define PWM_MAX ((1 << PWM_RES) - 1)
+const float PWM_MIN = 20.0; // Mínimo para mover motor
 
-const float PWM_MIN = 20.0;
+// --- PARÁMETROS FÍSICOS ---
 const float GEAR_RATIO = 56.25;
-const int   PULSES_PER_REV = 16;
-const int   CPR_OUTPUT = PULSES_PER_REV * 4 * GEAR_RATIO; // 3600
+const int PULSES_PER_REV = 16;
+const int CPR = PULSES_PER_REV * 4 * GEAR_RATIO; // ~3600 ticks/vuelta
 
-const unsigned long SAMPLE_MS = 100;
+// --- ESTRUCTURA DE UN MOTOR ---
+struct Motor {
+  // Hardware Pins
+  int pinIN1, pinIN2;
+  int pinEncA, pinEncB;
+  int pwmCh1, pwmCh2; // Canales LEDC
+  
+  // Encoder state
+  volatile long ticks;
+  long lastTicks; // Para calcular delta
 
-// Wheel parameters
-const float WHEEL_DIAM_M = 0.062f;
-const float WHEEL_CIRC_M = 3.14159265f * WHEEL_DIAM_M;
-
-uint32_t seq = 0;
-
-// PID gains
-float Kp_R = 0.0, Ki_R = 1.0, Kd_R = 0.0;
-const float INTEGRAL_MAX_R = 200.0;
-
-// Failsafe: si no llegan comandos, frena
-const unsigned long CMD_TIMEOUT_MS = 400;
-unsigned long lastCmdMs = 0;
-
-struct PIDState {
-  float setpointRPM = 0.0;
-  float currentRPM  = 0.0;
-
-  float error       = 0.0;
-  float errorSum    = 0.0;
-  float errorPrev   = 0.0;
-
-  float pidOutput   = 0.0;   // 0..100%
-  float pwmPercent  = 0.0;   // 0..100%
-
-  bool  direction   = true;  // true=forward, false=reverse
+  // PID state
+  float setpointRPM;
+  float currentRPM;
+  float errorSum;
+  float errorPrev;
+  float outputPercent;
+  
+  // Constantes PID (puedes ajustarlas individualmente si un motor es diferente)
+  float Kp, Ki, Kd;
 };
 
-PIDState motor;
+// Inicializamos los 3 motores
+Motor m1 = {M1_IN1, M1_IN2, M1_ENC_A, M1_ENC_B, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0.5, 1.0, 0.0};
+Motor m2 = {M2_IN1, M2_IN2, M2_ENC_A, M2_ENC_B, 2, 3, 0, 0, 0, 0, 0, 0, 0, 0.5, 1.0, 0.0};
+Motor m3 = {M3_IN1, M3_IN2, M3_ENC_A, M3_ENC_B, 4, 5, 0, 0, 0, 0, 0, 0, 0, 0.5, 1.0, 0.0};
 
-volatile long ticksR = 0;
+// Globales de Control
+bool globalDirection = true; // 1 = Forward, 0 = Reverse
+uint32_t seq = 0;
 unsigned long lastSampleTime = 0;
+unsigned long lastCmdMs = 0;
+const unsigned long SAMPLE_MS = 50; // 20Hz refresco
+const unsigned long TIMEOUT_MS = 500;
 
 String inputBuffer = "";
 
-// ---------------- ISR Encoder (x4) ----------------
-void IRAM_ATTR ISR_R_A() {
-  bool A = digitalRead(ENC_A);
-  bool B = digitalRead(ENC_B);
-  if (A == B) ticksR--;
-  else        ticksR++;
+// ================= INTERRUPCIONES (ISRs) =================
+// Deben ser funciones estáticas void. Es tedioso pero seguro.
+
+// Motor 1
+void IRAM_ATTR ISR_M1_A() { if(digitalRead(M1_ENC_A) == digitalRead(M1_ENC_B)) m1.ticks--; else m1.ticks++; }
+void IRAM_ATTR ISR_M1_B() { if(digitalRead(M1_ENC_A) != digitalRead(M1_ENC_B)) m1.ticks--; else m1.ticks++; }
+
+// Motor 2
+void IRAM_ATTR ISR_M2_A() { if(digitalRead(M2_ENC_A) == digitalRead(M2_ENC_B)) m2.ticks--; else m2.ticks++; }
+void IRAM_ATTR ISR_M2_B() { if(digitalRead(M2_ENC_A) != digitalRead(M2_ENC_B)) m2.ticks--; else m2.ticks++; }
+
+// Motor 3
+void IRAM_ATTR ISR_M3_A() { if(digitalRead(M3_ENC_A) == digitalRead(M3_ENC_B)) m3.ticks--; else m3.ticks++; }
+void IRAM_ATTR ISR_M3_B() { if(digitalRead(M3_ENC_A) != digitalRead(M3_ENC_B)) m3.ticks--; else m3.ticks++; }
+
+// ================= LOGICA PID Y MOTORES =================
+
+void setupMotor(Motor &m, void (*isrA)(), void (*isrB)()) {
+  pinMode(m.pinEncA, INPUT_PULLUP);
+  pinMode(m.pinEncB, INPUT_PULLUP);
+  attachInterrupt(digitalPinToInterrupt(m.pinEncA), isrA, CHANGE);
+  attachInterrupt(digitalPinToInterrupt(m.pinEncB), isrB, CHANGE);
+
+  ledcAttach(m.pinIN1, m.pwmCh1);
+  ledcAttach(m.pinIN2, m.pwmCh2);
+  ledcSetup(m.pwmCh1, PWM_FREQ, PWM_RES);
+  ledcSetup(m.pwmCh2, PWM_FREQ, PWM_RES);
+  ledcWrite(m.pwmCh1, 0);
+  ledcWrite(m.pwmCh2, 0);
 }
 
-void IRAM_ATTR ISR_R_B() {
-  bool A = digitalRead(ENC_A);
-  bool B = digitalRead(ENC_B);
-  if (A != B) ticksR--;
-  else        ticksR++;
-}
-
-// ---------------- Utilidades ----------------
-float calcularRPM(long ticks, float dt) {
-  return (ticks / (float)CPR_OUTPUT) * (60.0 / dt);
-}
-
-float computePID(PIDState &m, float dt, float Kp, float Ki, float Kd, float integralMax) {
-  if (dt <= 0) return m.pidOutput;
-
-  m.error = m.setpointRPM - abs(m.currentRPM);
-
-  float P = Kp * m.error;
-
-  m.errorSum += m.error * dt;
-  m.errorSum = constrain(m.errorSum, -integralMax, integralMax);
-  float I = Ki * m.errorSum;
-
-  float errorDiff = (m.error - m.errorPrev) / dt;
-  float D = Kd * errorDiff;
-  m.errorPrev = m.error;
-
-  m.pidOutput = P + I + D;
-  m.pidOutput = constrain(m.pidOutput, 0.0, 100.0);
-
-  return m.pidOutput;
-}
-
-float calcularVelocidadMPS(long dticks, float dt_s, bool forward) {
-  if (dt_s <= 0) return 0.0f;
-
-  // Revoluciones de la rueda en este intervalo
-  float rev = (float)dticks / (float)CPR_OUTPUT;
-
-  // Distancia recorrida en este intervalo
-  float dist_m = rev * WHEEL_CIRC_M;
-
-  // Velocidad
-  float v = dist_m / dt_s;
-
-  // Signo por dirección (si quieres v signed)
-  return forward ? v : -v;
-}
-
-void setMotorPins(int in1Pin, int in2Pin, float percent, bool forward) {
-  percent = constrain(percent, 0.0, 100.0);
-
-  int pwmValue = 0;
-
-  if (percent >= 0.1) {
-    float percentReal = map((long)(percent * 10), 0, 1000, (long)(PWM_MIN * 10), 1000) / 10.0;
-    pwmValue = (int)((percentReal / 100.0) * PWM_MAX);
-    pwmValue = constrain(pwmValue, 0, PWM_MAX);
+void driveMotor(Motor &m, bool forward) {
+  int pwmVal = 0;
+  // Convertir porcentaje 0-100 a valor PWM
+  if (m.outputPercent > 0.1) {
+    // Mapeo simple
+    pwmVal = map((long)(m.outputPercent*100), 0, 10000, 0, PWM_MAX);
+    pwmVal = constrain(pwmVal, 0, PWM_MAX);
   }
 
-  ledcWrite(in1Pin, 0);
-  ledcWrite(in2Pin, 0);
-
-  if (pwmValue == 0) return;
-
-  if (forward) ledcWrite(in1Pin, pwmValue);
-  else         ledcWrite(in2Pin, pwmValue);
-}
-
-// ---------------- Parseo de comandos ----------------
-void handleLine(String line) {
-  line.trim();
-  line.toUpperCase();
-  if (line.length() < 2) return;
-
-  // Dirección: D0 / D1
-  if (line[0] == 'D') {
-    int v = line.substring(1).toInt();
-    motor.direction = (v == 1);
-    lastCmdMs = millis();
+  if (pwmVal == 0) {
+    ledcWrite(m.pwmCh1, 0);
+    ledcWrite(m.pwmCh2, 0);
     return;
   }
 
-  // Setpoint: Sxx.x
-  if (line[0] == 'S') {
-    float sp = line.substring(1).toFloat();
-    sp = constrain(sp, 0.0, 67.0);
-    motor.setpointRPM = sp;
-    lastCmdMs = millis();
-    return;
-  }
-
-  // Puedes agregar más comandos aquí si ocupas
-}
-
-void readSerialLines() {
-  while (Serial.available()) {
-    char c = (char)Serial.read();
-    if (c == '\n' || c == '\r') {
-      if (inputBuffer.length() > 0) {
-        handleLine(inputBuffer);
-        inputBuffer = "";
-      }
-    } else {
-      inputBuffer += c;
-      if (inputBuffer.length() > 64) inputBuffer = ""; // evita overflow
-    }
+  if (forward) {
+    ledcWrite(m.pwmCh1, pwmVal);
+    ledcWrite(m.pwmCh2, 0);
+  } else {
+    ledcWrite(m.pwmCh1, 0);
+    ledcWrite(m.pwmCh2, pwmVal);
   }
 }
 
-// ---------------- Setup ----------------
+void updatePID(Motor &m, float dt) {
+  if (dt <= 0) return;
+
+  float error = m.setpointRPM - m.currentRPM; // currentRPM ya es positivo
+  
+  // P
+  float P = m.Kp * error;
+
+  // I
+  m.errorSum += error * dt;
+  m.errorSum = constrain(m.errorSum, -200.0, 200.0); // Anti-windup
+  float I = m.Ki * m.errorSum;
+
+  // D
+  float errorDiff = (error - m.errorPrev) / dt;
+  float D = m.Kd * errorDiff;
+  m.errorPrev = error;
+
+  m.outputPercent = P + I + D;
+  m.outputPercent = constrain(m.outputPercent, 0.0, 100.0);
+}
+
+// ================= COMUNICACIÓN =================
+
+void parseCommand(String line) {
+  // Formato recibido desde Python: CMD,dir,rpm
+  // Ejemplo: CMD,D1,20.5  o  CMD,1,20.5
+  
+  // Quitamos CMD,
+  int firstComma = line.indexOf(',');
+  if (firstComma == -1) return;
+  
+  String params = line.substring(firstComma + 1);
+  int secondComma = params.indexOf(',');
+  if (secondComma == -1) return;
+
+  String sDir = params.substring(0, secondComma);
+  String sRpm = params.substring(secondComma + 1);
+
+  // Parsear Dirección
+  // El python manda "D1" o "1". Manejamos ambos.
+  if (sDir.startsWith("D")) sDir.remove(0, 1);
+  int dirVal = sDir.toInt();
+  globalDirection = (dirVal == 1);
+
+  // Parsear RPM
+  float rpmVal = sRpm.toFloat();
+  rpmVal = constrain(rpmVal, 0.0, 80.0); // Limite de seguridad
+
+  // Actualizar Setpoints de LOS 3 MOTORES
+  m1.setpointRPM = rpmVal;
+  m2.setpointRPM = rpmVal;
+  m3.setpointRPM = rpmVal;
+  
+  lastCmdMs = millis();
+}
+
+// ================= MAIN =================
+
 void setup() {
   Serial.begin(115200);
-  delay(300);
+  
+  setupMotor(m1, ISR_M1_A, ISR_M1_B);
+  setupMotor(m2, ISR_M2_A, ISR_M2_B);
+  setupMotor(m3, ISR_M3_A, ISR_M3_B);
 
-  ledcAttach(IN1, PWM_FREQ, PWM_RESOLUTION);
-  ledcAttach(IN2, PWM_FREQ, PWM_RESOLUTION);
-  ledcWrite(IN1, 0);
-  ledcWrite(IN2, 0);
-
-  pinMode(ENC_A, INPUT_PULLUP);
-  pinMode(ENC_B, INPUT_PULLUP);
-  attachInterrupt(digitalPinToInterrupt(ENC_A), ISR_R_A, CHANGE);
-  attachInterrupt(digitalPinToInterrupt(ENC_B), ISR_R_B, CHANGE);
-
-  motor.direction = true;
-  motor.setpointRPM = 0.0;
-
-  lastCmdMs = millis();
   lastSampleTime = millis();
+  lastCmdMs = millis();
 }
 
-// ---------------- Loop ----------------
 void loop() {
-  readSerialLines();
-
-  // Failsafe: si no llegan comandos, frena
-  if (millis() - lastCmdMs > CMD_TIMEOUT_MS) {
-    motor.setpointRPM = 0.0;
-    motor.errorSum = 0.0;  // evita windup si se queda sin comando
+  // 1. Leer Serial
+  while (Serial.available()) {
+    char c = Serial.read();
+    if (c == '\n') {
+      inputBuffer.trim();
+      if (inputBuffer.startsWith("CMD")) {
+        parseCommand(inputBuffer);
+      }
+      inputBuffer = "";
+    } else {
+      inputBuffer += c;
+    }
   }
 
+  // 2. Failsafe (Detener si no hay señal)
+  if (millis() - lastCmdMs > TIMEOUT_MS) {
+    m1.setpointRPM = 0; m2.setpointRPM = 0; m3.setpointRPM = 0;
+    m1.errorSum = 0; m2.errorSum = 0; m3.errorSum = 0;
+  }
+
+  // 3. Ciclo de Control y Telemetría
   unsigned long now = millis();
   if (now - lastSampleTime >= SAMPLE_MS) {
-
-    portDISABLE_INTERRUPTS();
-    long tR = ticksR; ticksR = 0;
-    portENABLE_INTERRUPTS();
-
     float dt = (now - lastSampleTime) / 1000.0;
+    
+    // --- ATOMIC BLOCK START ---
+    portDISABLE_INTERRUPTS();
+    long t1 = m1.ticks;
+    long t2 = m2.ticks;
+    long t3 = m3.ticks;
+    portENABLE_INTERRUPTS();
+    // --- ATOMIC BLOCK END ---
 
-    motor.currentRPM = calcularRPM(tR, dt);
-    motor.pwmPercent = computePID(motor, dt, Kp_R, Ki_R, Kd_R, INTEGRAL_MAX_R);
+    // Calcular Delta Ticks para RPM
+    long dt1 = t1 - m1.lastTicks; m1.lastTicks = t1;
+    long dt2 = t2 - m2.lastTicks; m2.lastTicks = t2;
+    long dt3 = t3 - m3.lastTicks; m3.lastTicks = t3;
 
-    setMotorPins(IN1, IN2, motor.pwmPercent, motor.direction);
+    // Calcular RPM (Absoluto para el PID)
+    m1.currentRPM = abs((dt1 / (float)CPR) * (60.0 / dt));
+    m2.currentRPM = abs((dt2 / (float)CPR) * (60.0 / dt));
+    m3.currentRPM = abs((dt3 / (float)CPR) * (60.0 / dt));
 
-//    // Debug (opcional)
-//    Serial.print("SP:");  Serial.print(motor.setpointRPM, 1);
-//    Serial.print(" PV:"); Serial.print(motor.currentRPM, 1);
-//    Serial.print(" PWM:");Serial.println(motor.pwmPercent, 1);
+    // Ejecutar PID
+    updatePID(m1, dt);
+    updatePID(m2, dt);
+    updatePID(m3, dt);
 
-    float v_mps = calcularVelocidadMPS(tR, dt, motor.direction);
-    // --- Telemetría para la Raspberry (una línea fácil de parsear) ---
-    // Formato: ODOM,seq,t_ms,dt_ms,dticks,dir,rpm,v_mps
-    Serial.print("ODOM,");
-    Serial.print(seq++); Serial.print(","); // cantidad de paquetes enviados
-    Serial.print(now); Serial.print(","); // tiempo actual
-    Serial.print((unsigned long)(dt * 1000.0f)); Serial.print(","); // diferencia del tiempo previo al actual
-    Serial.print(tR); Serial.print(","); // ticks actuales
-    Serial.print(motor.direction ? 1 : 0); Serial.print(","); // dirección 
-    Serial.print(motor.currentRPM, 2); Serial.print(",");
-    Serial.println(v_mps, 4);
+    // Mover motores
+    driveMotor(m1, globalDirection);
+    driveMotor(m2, globalDirection);
+    driveMotor(m3, globalDirection);
+
+    // --- ENVIAR TELEMETRÍA ---
+    // Formato: HEADER, seq, dt_ms, t1, r1, t2, r2, t3, r3
+    // Nota: Enviamos ticks crudos acumulados (t1, t2, t3) para que la odometría de Python no pierda posición
+    Serial.print(DEVICE_ID); Serial.print(",");
+    Serial.print(seq++); Serial.print(",");
+    Serial.print((int)(dt * 1000)); Serial.print(",");
+    
+    Serial.print(t1); Serial.print(",");
+    Serial.print(m1.currentRPM, 1); Serial.print(",");
+    
+    Serial.print(t2); Serial.print(",");
+    Serial.print(m2.currentRPM, 1); Serial.print(",");
+    
+    Serial.print(t3); Serial.print(",");
+    Serial.println(m3.currentRPM, 1);
 
     lastSampleTime = now;
   }
 }
-
-//el formato que te di solamente es para un motor, lo que era para pruebas, en realidad vamos a tener 6 motores con sus respectivos encoders y 2 ESP32 (cada una va a controlar 3 motores). Como sugirirías compartir todas esa información para los 6 motores.
-//
-//Formato esperado: ID, seq, dt, t1, r1, t2, r2, t3, r3
-//    Ej: ESP_L,100,50,10,2.5,10,2.5,10,2.5
