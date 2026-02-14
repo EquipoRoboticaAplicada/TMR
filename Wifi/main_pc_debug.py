@@ -69,7 +69,7 @@ class FrameGrabber:
 
 
 # ---------------------------
-# Hilo opcional para envíos HTTP
+# Hilo para envíos HTTP
 # ---------------------------
 class Sender:
     def __init__(self, cmd_url, vision_url):
@@ -122,7 +122,7 @@ class Sender:
 
 
 # ---------------------------
-# Utilidades (tu lógica)
+# Utilidades 
 # ---------------------------
 def send_rpms(sender, left_rpm, right_rpm, dir_left, dir_right):
     payload = {
@@ -169,10 +169,10 @@ def clamp_rpm(rpm, min_rpm=20):
 
 
 def main():
-    # Hilo captura
+    # Inicia el hilo captura
     grabber = FrameGrabber(VIDEO_URL).start()
 
-    # Hilo envío (opcional pero recomendado)
+    # Inicia el hilo envío 
     sender = Sender(CMD_URL, VISION_URL).start()
 
     # --- Parámetros de estabilidad ---
