@@ -1,12 +1,27 @@
 # vision.py 
 
+import os
+import json
 import cv2 as cv
 import numpy as np
-import json
+
 
 # --- Rangos HSV ---
 with open(f"PYTHON\TMR\Wifi\colors.json") as f:
     RANGES=json.load(f)
+
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+CONFIG_DIR = os.path.join(BASE_DIR, "config")
+COLOR_FILE = os.path.join(CONFIG_DIR, "colors.json")
+
+if not os.path.exists(COLOR_FILE):
+    raise FileNotFoundError(
+        f"No se encontró el archivo de calibración en:\n{COLOR_FILE}\n"
+        "Ejecuta primero calibrate_colors.py"
+    )
+
+with open(COLOR_FILE, "r") as f:
+    COLOR_RANGES = json.load(f)
 
 
 DRAW = {
