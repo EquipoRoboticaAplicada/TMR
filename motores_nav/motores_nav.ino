@@ -24,6 +24,12 @@ const int   CPR_OUTPUT = PULSES_PER_REV * 4 * GEAR_RATIO; // 3600
 
 const unsigned long SAMPLE_MS = 100;
 
+// Wheel parameters
+const float WHEEL_DIAM_M = 0.062f;
+const float WHEEL_CIRC_M = 3.14159265f * WHEEL_DIAM_M;
+
+uint32_t seq = 0;
+
 // PID gains
 float Kp_R = 0.0, Ki_R = 1.0, Kd_R = 0.0;
 const float INTEGRAL_MAX_R = 200.0;
@@ -92,6 +98,22 @@ float computePID(PIDState &m, float dt, float Kp, float Ki, float Kd, float inte
   m.pidOutput = constrain(m.pidOutput, 0.0, 100.0);
 
   return m.pidOutput;
+}
+
+float calcularVelocidadMPS(long dticks, float dt_s, bool forward) {
+  if (dt_s <= 0) return 0.0f;
+
+  // Revoluciones de la rueda en este intervalo
+  float rev = (float)dticks / (float)CPR_OUTPUT;
+
+  // Distancia recorrida en este intervalo
+  float dist_m = rev * WHEEL_CIRC_M;
+
+  // Velocidad
+  float v = dist_m / dt_s;
+
+  // Signo por dirección (si quieres v signed)
+  return forward ? v : -v;
 }
 
 void setMotorPins(int in1Pin, int in2Pin, float percent, bool forward) {
@@ -201,10 +223,22 @@ void loop() {
 
     setMotorPins(IN1, IN2, motor.pwmPercent, motor.direction);
 
-    // Debug (opcional): baja la tasa si te satura
-    Serial.print("SP:");  Serial.print(motor.setpointRPM, 1);
-    Serial.print(" PV:"); Serial.print(motor.currentRPM, 1);
-    Serial.print(" PWM:");Serial.println(motor.pwmPercent, 1);
+//    // Debug (opcional)
+//    Serial.print("SP:");  Serial.print(motor.setpointRPM, 1);
+//    Serial.print(" PV:"); Serial.print(motor.currentRPM, 1);
+//    Serial.print(" PWM:");Serial.println(motor.pwmPercent, 1);
+
+    float v_mps = calcularVelocidadMPS(tR, dt, motor.direction);
+    // --- Telemetría para la Raspberry (una línea fácil de parsear) ---
+    // Formato: ODOM,seq,t_ms,dt_ms,dticks,dir,rpm,v_mps
+    Serial.print("ODOM,");
+    Serial.print(seq++); Serial.print(","); // cantidad de paquetes enviados
+    Serial.print(now); Serial.print(","); // tiempo actual
+    Serial.print((unsigned long)(dt * 1000.0f)); Serial.print(","); // diferencia del tiempo previo al actual
+    Serial.print(tR); Serial.print(","); // ticks actuales
+    Serial.print(motor.direction ? 1 : 0); Serial.print(","); // dirección 
+    Serial.print(motor.currentRPM, 2); Serial.print(",");
+    Serial.println(v_mps, 4);
 
     lastSampleTime = now;
   }
