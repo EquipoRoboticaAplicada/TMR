@@ -1,6 +1,7 @@
 import cv2 as cv
 import numpy as np
 import json
+import os
 
 
 # CONFIGURACION
@@ -72,8 +73,16 @@ while color_index<len(COLORS):
             
     color_index+=1
     
-with open("colors.json","w") as f:
-    json.dump(calibrated,f,indent=4)
+
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+CONFIG_DIR = os.path.join(BASE_DIR, "config")
+os.makedirs(CONFIG_DIR, exist_ok=True)
+
+file_path = os.path.join(CONFIG_DIR, "colors.json")
+
+with open(file_path, "w") as f:
+    json.dump(calibrated, f, indent=4)
+
 
 print("Calibración Completada")
 print("Archivo .json guardado")
