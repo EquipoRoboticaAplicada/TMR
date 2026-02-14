@@ -5,7 +5,7 @@ import numpy as np
 import json
 
 # --- Rangos HSV ---
-with open(f"Wifi\colors.json") as f:
+with open(f"PYTHON\TMR\Wifi\colors.json") as f:
     RANGES=json.load(f)
 
 
