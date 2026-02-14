@@ -74,7 +74,7 @@ def detect_colors(frame, draw=True):
 
         # ranges puede ser:
         # - dict: {"lower":[...], "upper":[...]}
-        # - list: [{"lower":[...], "upper":[...]}, {"lower":[...], "upper":[...]}]
+        # - list (en el caso del rojo): [{"lower":[...], "upper":[...]}, {"lower":[...], "upper":[...]}]
         if isinstance(ranges, dict):
             lower = np.array(ranges["lower"], dtype=np.uint8)
             upper = np.array(ranges["upper"], dtype=np.uint8)
