@@ -1,25 +1,27 @@
-const char* ESP_ID = "ESP_L"; 
+const char* ESP_ID = "ESP_L";
 
 // Para IBT-2: IN1 = RPWM, IN2 = LPWM
 // Orden: 0=adelante, 1=en medio, 2=atrás
 const int IN1[3] = {27, 26, 25};  // RPWM
 const int IN2[3] = {14, 13, 23};  // LPWM
 
-const int ENC_A[3] = {32, 25, 26};  // cambia por tus pines reales
-const int ENC_B[3] = {33, 34, 35};  // cambia por tus pines reales
+// FIX #1: Los pines de encoder YA NO comparten pines con IN1/IN2.
+// Antes: ENC_A = {32, 25, 26} → pines 25 y 26 colisionaban con IN1[2] e IN1[1].
+// Ajusta estos valores a los pines físicos reales que uses para encoders.
+const int ENC_A[3] = {32, 34, 36};  // ← CORRECCIÓN: pines sin conflicto
+const int ENC_B[3] = {33, 35, 39};  // ← CORRECCIÓN: pines sin conflicto
 
-#define PWM_FREQ 20000
+#define PWM_FREQ       20000
 #define PWM_RESOLUTION 10
 const int PWM_MAX = (1 << PWM_RESOLUTION) - 1;
 
-const float PWM_MIN = 20.0;
-const float GEAR_RATIO = 56.25;
-const int   PULSES_PER_REV = 16;
-const int   CPR_OUTPUT = PULSES_PER_REV * 4 * GEAR_RATIO; // 3600
+const float PWM_MIN         = 20.0;
+const float GEAR_RATIO      = 56.25;
+const int   PULSES_PER_REV  = 16;
+const int   CPR_OUTPUT      = PULSES_PER_REV * 4 * GEAR_RATIO; // 3600
 
 const unsigned long SAMPLE_MS = 100;
 
-// Wheel parameters
 const float WHEEL_DIAM_M = 0.062f;
 const float WHEEL_CIRC_M = 3.14159265f * WHEEL_DIAM_M;
 
@@ -31,58 +33,72 @@ float Ki[3] = {1.0, 1.0, 1.0};
 float Kd[3] = {0.0, 0.0, 0.0};
 const float INTEGRAL_MAX = 200.0;
 
-// Failsafe: si no llegan comandos, frena
+// Failsafe
 const unsigned long CMD_TIMEOUT_MS = 400;
 unsigned long lastCmdMs = 0;
 
 struct PIDState {
   float setpointRPM = 0.0;
   float currentRPM  = 0.0;
-
   float error       = 0.0;
   float errorSum    = 0.0;
   float errorPrev   = 0.0;
-
-  float pidOutput   = 0.0;   // 0..100%
-  float pwmPercent  = 0.0;   // 0..100%
-
-  bool  direction   = true;  // true=forward, false=reverse
+  float pidOutput   = 0.0;
+  float pwmPercent  = 0.0;
+  bool  direction   = true;
 };
 
 PIDState motor[3];
 
-volatile long ticks[3] = {0, 0, 0};
-unsigned long lastSampleTime = 0;
+volatile long  ticks[3]        = {0, 0, 0};
+// FIX #2: estado previo por encoder para decodificación x4 confiable
+volatile int8_t lastEncState[3] = {0, 0, 0};
 
+unsigned long lastSampleTime = 0;
 String inputBuffer = "";
 
-// ---------------- ISR Encoder (x4) ----------------
+// ---------------- ISR Encoder x4 (lookup table) ----------------
+// FIX #2: reemplaza la lógica frágil "if (A == B)" por tabla de estados.
+// Secuencia forward:  00→01→11→10→00  (+1 cada transición válida)
+// Secuencia backward: 00→10→11→01→00  (-1 cada transición válida)
 void IRAM_ATTR encoderISR(void* arg) {
-  int i = (int)(intptr_t)arg;  // índice 0..2
+  int i = (int)(intptr_t)arg;
 
   bool A = digitalRead(ENC_A[i]);
   bool B = digitalRead(ENC_B[i]);
 
-  // Misma lógica que ya usabas (x4)
-  // Nota: funciona tanto si la interrupción viene de A como de B.
-  if (A == B) ticks[i]--;
-  else        ticks[i]++;
+  int8_t state = ((int8_t)A << 1) | (int8_t)B;
+  int8_t prev  = lastEncState[i];
+  lastEncState[i] = state;
+
+  // Tabla de transiciones (prev<<2 | curr) → incremento
+  static const int8_t lookup[16] = {
+     0, -1,  1,  0,
+     1,  0,  0, -1,
+    -1,  0,  0,  1,
+     0,  1, -1,  0
+  };
+
+  ticks[i] += lookup[(prev << 2) | state];
 }
 
 // ---------------- Utilidades ----------------
-float calcularRPM(long ticks, float dt) {
-  return (ticks / (float)CPR_OUTPUT) * (60.0 / dt);
+
+// FIX #4: protección contra dt == 0 para evitar inf/NaN en serial
+float calcularRPM(long dticks, float dt) {
+  if (dt <= 0.0f || CPR_OUTPUT == 0) return 0.0f;
+  return (dticks / (float)CPR_OUTPUT) * (60.0f / dt);
 }
 
 float computePID(PIDState &m, float dt, float Kp, float Ki, float Kd, float integralMax) {
   if (dt <= 0) return m.pidOutput;
 
-  m.error = m.setpointRPM - abs(m.currentRPM);
+  m.error = m.setpointRPM - fabsf(m.currentRPM);
 
   float P = Kp * m.error;
 
   m.errorSum += m.error * dt;
-  m.errorSum = constrain(m.errorSum, -integralMax, integralMax);
+  m.errorSum  = constrain(m.errorSum, -integralMax, integralMax);
   float I = Ki * m.errorSum;
 
   float errorDiff = (m.error - m.errorPrev) / dt;
@@ -90,35 +106,29 @@ float computePID(PIDState &m, float dt, float Kp, float Ki, float Kd, float inte
   m.errorPrev = m.error;
 
   m.pidOutput = P + I + D;
-  m.pidOutput = constrain(m.pidOutput, 0.0, 100.0);
+  m.pidOutput = constrain(m.pidOutput, 0.0f, 100.0f);
 
   return m.pidOutput;
 }
 
-float calcularVelocidadMPS(long dticks, float dt_s, bool forward) {
-  if (dt_s <= 0) return 0.0f;
-
-  // Revoluciones de la rueda en este intervalo
-  float rev = (float)dticks / (float)CPR_OUTPUT;
-
-  // Distancia recorrida en este intervalo
-  float dist_m = rev * WHEEL_CIRC_M;
-
-  // Velocidad
-  float v = dist_m / dt_s;
-
-  // Signo por dirección (si quieres v signed)
-  return forward ? v : -v;
+// FIX #3: velocidad con signo derivado de los ticks (no de la dirección comandada).
+// Ticks positivos → avance, negativos → retroceso, independientemente del comando.
+float calcularVelocidadMPS(long dticks, float dt_s) {
+  if (dt_s <= 0.0f) return 0.0f;
+  float rev    = (float)dticks / (float)CPR_OUTPUT;  // signed
+  float dist_m = rev * WHEEL_CIRC_M;                 // signed
+  return dist_m / dt_s;                              // m/s signed
 }
 
 void setMotorPins(int in1Pin, int in2Pin, float percent, bool forward) {
-  percent = constrain(percent, 0.0, 100.0);
+  percent = constrain(percent, 0.0f, 100.0f);
 
   int pwmValue = 0;
 
-  if (percent >= 0.1) {
-    float percentReal = map((long)(percent * 10), 0, 1000, (long)(PWM_MIN * 10), 1000) / 10.0;
-    pwmValue = (int)((percentReal / 100.0) * PWM_MAX);
+  if (percent >= 0.1f) {
+    float percentReal = map((long)(percent * 10), 0, 1000,
+                            (long)(PWM_MIN * 10), 1000) / 10.0f;
+    pwmValue = (int)((percentReal / 100.0f) * PWM_MAX);
     pwmValue = constrain(pwmValue, 0, PWM_MAX);
   }
 
@@ -137,28 +147,19 @@ void handleLine(String line) {
   line.toUpperCase();
   if (line.length() < 2) return;
 
-  // Dirección: D0 / D1
   if (line[0] == 'D') {
-    int v = line.substring(1).toInt();
-    motor[0].direction = (v == 1);
-    motor[1].direction = (v == 1);
-    motor[2].direction = (v == 1);
+    bool dir = (line.substring(1).toInt() == 1);
+    for (int i = 0; i < 3; i++) motor[i].direction = dir;
     lastCmdMs = millis();
     return;
   }
 
-  // Setpoint: Sxx.x
   if (line[0] == 'S') {
-    float sp = line.substring(1).toFloat();
-    sp = constrain(sp, 0.0, 67.0);
-    motor[0].setpointRPM = sp;
-    motor[1].setpointRPM = sp;
-    motor[2].setpointRPM = sp;
+    float sp = constrain(line.substring(1).toFloat(), 0.0f, 67.0f);
+    for (int i = 0; i < 3; i++) motor[i].setpointRPM = sp;
     lastCmdMs = millis();
     return;
   }
-
-  // Puedes agregar más comandos aquí si ocupas
 }
 
 void readSerialLines() {
@@ -171,7 +172,7 @@ void readSerialLines() {
       }
     } else {
       inputBuffer += c;
-      if (inputBuffer.length() > 64) inputBuffer = ""; // evita overflow
+      if (inputBuffer.length() > 64) inputBuffer = "";
     }
   }
 }
@@ -182,24 +183,30 @@ void setup() {
   delay(300);
 
   for (int i = 0; i < 3; i++) {
-    
+    // Configurar PWM de motores
     ledcAttach(IN1[i], PWM_FREQ, PWM_RESOLUTION);
     ledcAttach(IN2[i], PWM_FREQ, PWM_RESOLUTION);
     ledcWrite(IN1[i], 0);
     ledcWrite(IN2[i], 0);
-    
+
+    // Configurar encoders (pines ahora sin conflicto con IN1/IN2)
     pinMode(ENC_A[i], INPUT_PULLUP);
     pinMode(ENC_B[i], INPUT_PULLUP);
-  
+
+    // Inicializar estado previo del encoder
+    bool A = digitalRead(ENC_A[i]);
+    bool B = digitalRead(ENC_B[i]);
+    lastEncState[i] = ((int8_t)A << 1) | (int8_t)B;
+
+    // Interrupción en ambos canales para x4
     attachInterruptArg(digitalPinToInterrupt(ENC_A[i]), encoderISR, (void*)(intptr_t)i, CHANGE);
     attachInterruptArg(digitalPinToInterrupt(ENC_B[i]), encoderISR, (void*)(intptr_t)i, CHANGE);
-  
-    motor[i].direction = true;
-    motor[i].setpointRPM = 0.0;
-  
+
+    motor[i].direction    = true;
+    motor[i].setpointRPM  = 0.0f;
   }
 
-  lastCmdMs = millis();
+  lastCmdMs      = millis();
   lastSampleTime = millis();
 }
 
@@ -207,45 +214,44 @@ void setup() {
 void loop() {
   readSerialLines();
 
-  // Failsafe: si no llegan comandos, frena
+  // Failsafe
   if (millis() - lastCmdMs > CMD_TIMEOUT_MS) {
-    for(int i = 0; i < 3; i++) {
-      motor[i].setpointRPM = 0.0;
-      motor[i].errorSum = 0.0;  // evita windup si se queda sin comando 
+    for (int i = 0; i < 3; i++) {
+      motor[i].setpointRPM = 0.0f;
+      motor[i].errorSum    = 0.0f;
     }
   }
 
   unsigned long now = millis();
   if (now - lastSampleTime >= SAMPLE_MS) {
-  
+
     uint32_t dt_ms = now - lastSampleTime;
-    float dt = dt_ms / 1000.0f;
-  
+    float    dt    = dt_ms / 1000.0f;
+
     long dticks[3];
-  
-    // Lee y resetea ticks de los 3 motores de forma atómica
+
     portDISABLE_INTERRUPTS();
     dticks[0] = ticks[0]; ticks[0] = 0;
     dticks[1] = ticks[1]; ticks[1] = 0;
     dticks[2] = ticks[2]; ticks[2] = 0;
     portENABLE_INTERRUPTS();
-  
+
     float v_mps[3];
-  
-    // Calcula PID + aplica PWM para cada motor
+
     for (int i = 0; i < 3; i++) {
       motor[i].currentRPM = calcularRPM(dticks[i], dt);
       motor[i].pwmPercent = computePID(motor[i], dt, Kp[i], Ki[i], Kd[i], INTEGRAL_MAX);
       setMotorPins(IN1[i], IN2[i], motor[i].pwmPercent, motor[i].direction);
-  
-      v_mps[i] = calcularVelocidadMPS(dticks[i], dt, motor[i].direction);
+
+      // FIX #3: velocidad con signo real de encoder, no de dirección comandada
+      v_mps[i] = calcularVelocidadMPS(dticks[i], dt);
     }
-  
-    // UART packet: ID, seq, dt, t1, r1, t2, r2, t3, r3
+
+    // Paquete UART: ID, seq, dt_ms, dticks0, v0, dticks1, v1, dticks2, v2
     Serial.print(ESP_ID); Serial.print(",");
     Serial.print(seq++);  Serial.print(",");
     Serial.print(dt_ms);
-  
+
     for (int i = 0; i < 3; i++) {
       Serial.print(",");
       Serial.print(dticks[i]);
@@ -253,23 +259,6 @@ void loop() {
       Serial.print(v_mps[i], 4);
     }
     Serial.println();
-  
-
-//    // Debug (opcional)
-//    Serial.print("SP:");  Serial.print(motor.setpointRPM, 1);
-//    Serial.print(" PV:"); Serial.print(motor.currentRPM, 1);
-//    Serial.print(" PWM:");Serial.println(motor.pwmPercent, 1);
-
-    // --- Telemetría para la Raspberry (una línea fácil de parsear) ---
-    // Formato: ODOM,seq,t_ms,dt_ms,dticks,dir,rpm,v_mps
-//    Serial.print("ODOM,");
-//    Serial.print(seq++); Serial.print(","); // cantidad de paquetes enviados
-//    Serial.print(now); Serial.print(","); // tiempo actual
-//    Serial.print((unsigned long)(dt * 1000.0f)); Serial.print(","); // diferencia del tiempo previo al actual
-//    Serial.print(tR); Serial.print(","); // ticks actuales
-//    Serial.print(motor.direction ? 1 : 0); Serial.print(","); // dirección 
-//    Serial.print(motor.currentRPM, 2); Serial.print(",");
-//    Serial.println(v_mps, 4);
 
     lastSampleTime = now;
   }
