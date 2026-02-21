@@ -1,272 +1,243 @@
-// =====================================================
-// CONTROLADOR 3 MOTORES (ROVER 6WD - Lado Independiente)
-// =====================================================
+const char* ESP_ID = "ESP_2WD";
 
-// !!! IMPORTANTE: CAMBIA ESTO SEGÚN EL LADO !!!
-// Usa "ESP_L" para la izquierda, "ESP_R" para la derecha
-#define DEVICE_ID "ESP_L" 
+// Definición de pines para 2 motores (Izquierdo = 0, Derecho = 1)
+// Ajusta estos pines a tu cableado real con los drivers (ej. IBT-2 o L298N)
+const int IN1[2] = {27, 25}; // RPWM o Adelante
+const int IN2[2] = {14, 26}; // LPWM o Atrás
 
-// --- DEFINICIÓN DE PINES (Ajusta según tu conexión) ---
-// MOTOR 1
-#define M1_IN1 27
-#define M1_IN2 14
-#define M1_ENC_A 32
-#define M1_ENC_B 33
+// Pines de los encoders (usando pines sin conflicto del código original)
+const int ENC_A[2] = {32, 34};
+const int ENC_B[2] = {33, 35};
 
-// MOTOR 2
-#define M2_IN1 25
-#define M2_IN2 26
-#define M2_ENC_A 4
-#define M2_ENC_B 16 // Ojo: RX2 suele ser 16, revisa tu board
+#define PWM_FREQ       20000
+#define PWM_RESOLUTION 10
+const int PWM_MAX = (1 << PWM_RESOLUTION) - 1;
+const float PWM_MIN         = 20.0;
+const float GEAR_RATIO      = 56.25;
+const int   PULSES_PER_REV  = 16;
+const int   CPR_OUTPUT      = PULSES_PER_REV * 4 * GEAR_RATIO;
 
-// MOTOR 3
-#define M3_IN1 18
-#define M3_IN2 19
-#define M3_ENC_A 21
-#define M3_ENC_B 22
+const unsigned long SAMPLE_MS = 100;
 
-// --- CONFIGURACIÓN PWM ---
-#define PWM_FREQ 20000
-#define PWM_RES 10
-#define PWM_MAX ((1 << PWM_RES) - 1)
-const float PWM_MIN = 20.0; // Mínimo para mover motor
+const float WHEEL_DIAM_M = 0.062f;
+const float WHEEL_CIRC_M = 3.14159265f * WHEEL_DIAM_M;
+uint32_t seq = 0;
 
-// --- PARÁMETROS FÍSICOS ---
-const float GEAR_RATIO = 56.25;
-const int PULSES_PER_REV = 16;
-const int CPR = PULSES_PER_REV * 4 * GEAR_RATIO; // ~3600 ticks/vuelta
+// Ganancias PID (Individuales por si un motor responde distinto)
+float Kp[2] = {0.0, 0.0};
+float Ki[2] = {1.0, 1.0};
+float Kd[2] = {0.0, 0.0};
+const float INTEGRAL_MAX = 200.0;
 
-// --- ESTRUCTURA DE UN MOTOR ---
-struct Motor {
-  // Hardware Pins
-  int pinIN1, pinIN2;
-  int pinEncA, pinEncB;
-  int pwmCh1, pwmCh2; // Canales LEDC
-  
-  // Encoder state
-  volatile long ticks;
-  long lastTicks; // Para calcular delta
+// Failsafe
+const unsigned long CMD_TIMEOUT_MS = 400;
+unsigned long lastCmdMs = 0;
 
-  // PID state
-  float setpointRPM;
-  float currentRPM;
-  float errorSum;
-  float errorPrev;
-  float outputPercent;
-  
-  // Constantes PID (puedes ajustarlas individualmente si un motor es diferente)
-  float Kp, Ki, Kd;
+struct PIDState {
+  float setpointRPM = 0.0;
+  float currentRPM  = 0.0;
+  float error       = 0.0;
+  float errorSum    = 0.0;
+  float errorPrev   = 0.0;
+  float pidOutput   = 0.0;
+  float pwmPercent  = 0.0;
+  bool  direction   = true;
 };
 
-// Inicializamos los 3 motores
-Motor m1 = {M1_IN1, M1_IN2, M1_ENC_A, M1_ENC_B, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0.5, 1.0, 0.0};
-Motor m2 = {M2_IN1, M2_IN2, M2_ENC_A, M2_ENC_B, 2, 3, 0, 0, 0, 0, 0, 0, 0, 0.5, 1.0, 0.0};
-Motor m3 = {M3_IN1, M3_IN2, M3_ENC_A, M3_ENC_B, 4, 5, 0, 0, 0, 0, 0, 0, 0, 0.5, 1.0, 0.0};
-
-// Globales de Control
-bool globalDirection = true; // 1 = Forward, 0 = Reverse
-uint32_t seq = 0;
+PIDState motor[2];
+volatile long ticks[2] = {0, 0};
+long last_ticks[2]     = {0, 0}; // Para calcular el delta sin perder el absoluto
+volatile int8_t lastEncState[2] = {0, 0};
 unsigned long lastSampleTime = 0;
-unsigned long lastCmdMs = 0;
-const unsigned long SAMPLE_MS = 50; // 20Hz refresco
-const unsigned long TIMEOUT_MS = 500;
-
 String inputBuffer = "";
 
-// ================= INTERRUPCIONES (ISRs) =================
-// Deben ser funciones estáticas void. Es tedioso pero seguro.
+// ---------------- ISR Encoder x4 (lookup table) ----------------
+void IRAM_ATTR encoderISR(void* arg) {
+  int i = (int)(intptr_t)arg;
+  bool A = digitalRead(ENC_A[i]);
+  bool B = digitalRead(ENC_B[i]);
 
-// Motor 1
-void IRAM_ATTR ISR_M1_A() { if(digitalRead(M1_ENC_A) == digitalRead(M1_ENC_B)) m1.ticks--; else m1.ticks++; }
-void IRAM_ATTR ISR_M1_B() { if(digitalRead(M1_ENC_A) != digitalRead(M1_ENC_B)) m1.ticks--; else m1.ticks++; }
+  int8_t state = ((int8_t)A << 1) | (int8_t)B;
+  int8_t prev  = lastEncState[i];
+  lastEncState[i] = state;
 
-// Motor 2
-void IRAM_ATTR ISR_M2_A() { if(digitalRead(M2_ENC_A) == digitalRead(M2_ENC_B)) m2.ticks--; else m2.ticks++; }
-void IRAM_ATTR ISR_M2_B() { if(digitalRead(M2_ENC_A) != digitalRead(M2_ENC_B)) m2.ticks--; else m2.ticks++; }
-
-// Motor 3
-void IRAM_ATTR ISR_M3_A() { if(digitalRead(M3_ENC_A) == digitalRead(M3_ENC_B)) m3.ticks--; else m3.ticks++; }
-void IRAM_ATTR ISR_M3_B() { if(digitalRead(M3_ENC_A) != digitalRead(M3_ENC_B)) m3.ticks--; else m3.ticks++; }
-
-// ================= LOGICA PID Y MOTORES =================
-
-void setupMotor(Motor &m, void (*isrA)(), void (*isrB)()) {
-  pinMode(m.pinEncA, INPUT_PULLUP);
-  pinMode(m.pinEncB, INPUT_PULLUP);
-  attachInterrupt(digitalPinToInterrupt(m.pinEncA), isrA, CHANGE);
-  attachInterrupt(digitalPinToInterrupt(m.pinEncB), isrB, CHANGE);
-
-  ledcAttach(m.pinIN1, m.pwmCh1);
-  ledcAttach(m.pinIN2, m.pwmCh2);
-  ledcSetup(m.pwmCh1, PWM_FREQ, PWM_RES);
-  ledcSetup(m.pwmCh2, PWM_FREQ, PWM_RES);
-  ledcWrite(m.pwmCh1, 0);
-  ledcWrite(m.pwmCh2, 0);
+  static const int8_t lookup[16] = {
+     0, -1,  1,  0,
+     1,  0,  0, -1,
+    -1,  0,  0,  1,
+     0,  1, -1,  0
+  };
+  ticks[i] += lookup[(prev << 2) | state];
 }
 
-void driveMotor(Motor &m, bool forward) {
-  int pwmVal = 0;
-  // Convertir porcentaje 0-100 a valor PWM
-  if (m.outputPercent > 0.1) {
-    // Mapeo simple
-    pwmVal = map((long)(m.outputPercent*100), 0, 10000, 0, PWM_MAX);
-    pwmVal = constrain(pwmVal, 0, PWM_MAX);
+// ---------------- Utilidades ----------------
+float calcularRPM(long dticks, float dt) {
+  if (dt <= 0.0f || CPR_OUTPUT == 0) return 0.0f;
+  return (dticks / (float)CPR_OUTPUT) * (60.0f / dt);
+}
+
+float computePID(PIDState &m, float dt, float Kp, float Ki, float Kd, float integralMax) {
+  if (dt <= 0) return m.pidOutput;
+  m.error = m.setpointRPM - fabsf(m.currentRPM);
+
+  float P = Kp * m.error;
+
+  m.errorSum += m.error * dt;
+  m.errorSum  = constrain(m.errorSum, -integralMax, integralMax);
+  float I = Ki * m.errorSum;
+
+  float errorDiff = (m.error - m.errorPrev) / dt;
+  float D = Kd * errorDiff;
+  m.errorPrev = m.error;
+
+  m.pidOutput = P + I + D;
+  m.pidOutput = constrain(m.pidOutput, 0.0f, 100.0f);
+
+  return m.pidOutput;
+}
+
+float calcularVelocidadMPS(long dticks, float dt_s) {
+  if (dt_s <= 0.0f) return 0.0f;
+  float rev    = (float)dticks / (float)CPR_OUTPUT;
+  float dist_m = rev * WHEEL_CIRC_M;
+  return dist_m / dt_s;
+}
+
+void setMotorPins(int in1Pin, int in2Pin, float percent, bool forward) {
+  percent = constrain(percent, 0.0f, 100.0f);
+  int pwmValue = 0;
+
+  if (percent >= 0.1f) {
+    float percentReal = map((long)(percent * 10), 0, 1000,
+                            (long)(PWM_MIN * 10), 1000) / 10.0f;
+    pwmValue = (int)((percentReal / 100.0f) * PWM_MAX);
+    pwmValue = constrain(pwmValue, 0, PWM_MAX);
   }
 
-  if (pwmVal == 0) {
-    ledcWrite(m.pwmCh1, 0);
-    ledcWrite(m.pwmCh2, 0);
-    return;
+  ledcWrite(in1Pin, 0);
+  ledcWrite(in2Pin, 0);
+  if (pwmValue == 0) return;
+
+  if (forward) ledcWrite(in1Pin, pwmValue);
+  else         ledcWrite(in2Pin, pwmValue);
+}
+
+// ---------------- Parseo de comandos ----------------
+void handleLine(String line) {
+  line.trim();
+  line.toUpperCase();
+  if (line.length() < 3) return;
+
+  // Comandos Izquierdos (DL/SL) y Derechos (DR/SR)
+  if (line.startsWith("DL")) {
+    motor[0].direction = (line.substring(2).toInt() == 1);
+    lastCmdMs = millis();
+  } else if (line.startsWith("DR")) {
+    motor[1].direction = (line.substring(2).toInt() == 1);
+    lastCmdMs = millis();
+  } else if (line.startsWith("SL")) {
+    motor[0].setpointRPM = constrain(line.substring(2).toFloat(), 0.0f, 67.0f);
+    lastCmdMs = millis();
+  } else if (line.startsWith("SR")) {
+    motor[1].setpointRPM = constrain(line.substring(2).toFloat(), 0.0f, 67.0f);
+    lastCmdMs = millis();
   }
-
-  if (forward) {
-    ledcWrite(m.pwmCh1, pwmVal);
-    ledcWrite(m.pwmCh2, 0);
-  } else {
-    ledcWrite(m.pwmCh1, 0);
-    ledcWrite(m.pwmCh2, pwmVal);
-  }
 }
 
-void updatePID(Motor &m, float dt) {
-  if (dt <= 0) return;
-
-  float error = m.setpointRPM - m.currentRPM; // currentRPM ya es positivo
-  
-  // P
-  float P = m.Kp * error;
-
-  // I
-  m.errorSum += error * dt;
-  m.errorSum = constrain(m.errorSum, -200.0, 200.0); // Anti-windup
-  float I = m.Ki * m.errorSum;
-
-  // D
-  float errorDiff = (error - m.errorPrev) / dt;
-  float D = m.Kd * errorDiff;
-  m.errorPrev = error;
-
-  m.outputPercent = P + I + D;
-  m.outputPercent = constrain(m.outputPercent, 0.0, 100.0);
-}
-
-// ================= COMUNICACIÓN =================
-
-void parseCommand(String line) {
-  // Formato recibido desde Python: CMD,dir,rpm
-  // Ejemplo: CMD,D1,20.5  o  CMD,1,20.5
-  
-  // Quitamos CMD,
-  int firstComma = line.indexOf(',');
-  if (firstComma == -1) return;
-  
-  String params = line.substring(firstComma + 1);
-  int secondComma = params.indexOf(',');
-  if (secondComma == -1) return;
-
-  String sDir = params.substring(0, secondComma);
-  String sRpm = params.substring(secondComma + 1);
-
-  // Parsear Dirección
-  // El python manda "D1" o "1". Manejamos ambos.
-  if (sDir.startsWith("D")) sDir.remove(0, 1);
-  int dirVal = sDir.toInt();
-  globalDirection = (dirVal == 1);
-
-  // Parsear RPM
-  float rpmVal = sRpm.toFloat();
-  rpmVal = constrain(rpmVal, 0.0, 80.0); // Limite de seguridad
-
-  // Actualizar Setpoints de LOS 3 MOTORES
-  m1.setpointRPM = rpmVal;
-  m2.setpointRPM = rpmVal;
-  m3.setpointRPM = rpmVal;
-  
-  lastCmdMs = millis();
-}
-
-// ================= MAIN =================
-
-void setup() {
-  Serial.begin(115200);
-  
-  setupMotor(m1, ISR_M1_A, ISR_M1_B);
-  setupMotor(m2, ISR_M2_A, ISR_M2_B);
-  setupMotor(m3, ISR_M3_A, ISR_M3_B);
-
-  lastSampleTime = millis();
-  lastCmdMs = millis();
-}
-
-void loop() {
-  // 1. Leer Serial
+void readSerialLines() {
   while (Serial.available()) {
-    char c = Serial.read();
-    if (c == '\n') {
-      inputBuffer.trim();
-      if (inputBuffer.startsWith("CMD")) {
-        parseCommand(inputBuffer);
+    char c = (char)Serial.read();
+    if (c == '\n' || c == '\r') {
+      if (inputBuffer.length() > 0) {
+        handleLine(inputBuffer);
+        inputBuffer = "";
       }
-      inputBuffer = "";
     } else {
       inputBuffer += c;
+      if (inputBuffer.length() > 64) inputBuffer = "";
+    }
+  }
+}
+
+// ---------------- Setup ----------------
+void setup() {
+  Serial.begin(115200);
+  delay(300);
+  for (int i = 0; i < 2; i++) {
+    ledcAttach(IN1[i], PWM_FREQ, PWM_RESOLUTION);
+    ledcAttach(IN2[i], PWM_FREQ, PWM_RESOLUTION);
+    ledcWrite(IN1[i], 0);
+    ledcWrite(IN2[i], 0);
+
+    pinMode(ENC_A[i], INPUT_PULLUP);
+    pinMode(ENC_B[i], INPUT_PULLUP);
+
+    bool A = digitalRead(ENC_A[i]);
+    bool B = digitalRead(ENC_B[i]);
+    lastEncState[i] = ((int8_t)A << 1) | (int8_t)B;
+
+    attachInterruptArg(digitalPinToInterrupt(ENC_A[i]), encoderISR, (void*)(intptr_t)i, CHANGE);
+    attachInterruptArg(digitalPinToInterrupt(ENC_B[i]), encoderISR, (void*)(intptr_t)i, CHANGE);
+
+    motor[i].direction    = true;
+    motor[i].setpointRPM  = 0.0f;
+  }
+
+  lastCmdMs      = millis();
+  lastSampleTime = millis();
+}
+
+// ---------------- Loop ----------------
+void loop() {
+  readSerialLines();
+
+  // Failsafe
+  if (millis() - lastCmdMs > CMD_TIMEOUT_MS) {
+    for (int i = 0; i < 2; i++) {
+      motor[i].setpointRPM = 0.0f;
+      motor[i].errorSum    = 0.0f;
     }
   }
 
-  // 2. Failsafe (Detener si no hay señal)
-  if (millis() - lastCmdMs > TIMEOUT_MS) {
-    m1.setpointRPM = 0; m2.setpointRPM = 0; m3.setpointRPM = 0;
-    m1.errorSum = 0; m2.errorSum = 0; m3.errorSum = 0;
-  }
-
-  // 3. Ciclo de Control y Telemetría
   unsigned long now = millis();
   if (now - lastSampleTime >= SAMPLE_MS) {
-    float dt = (now - lastSampleTime) / 1000.0;
-    
-    // --- ATOMIC BLOCK START ---
+
+    uint32_t dt_ms = now - lastSampleTime;
+    float    dt    = dt_ms / 1000.0f;
+
+    long current_ticks[2];
+
+    // Leer ticks de forma segura sin reiniciarlos a 0
     portDISABLE_INTERRUPTS();
-    long t1 = m1.ticks;
-    long t2 = m2.ticks;
-    long t3 = m3.ticks;
+    current_ticks[0] = ticks[0];
+    current_ticks[1] = ticks[1];
     portENABLE_INTERRUPTS();
-    // --- ATOMIC BLOCK END ---
 
-    // Calcular Delta Ticks para RPM
-    long dt1 = t1 - m1.lastTicks; m1.lastTicks = t1;
-    long dt2 = t2 - m2.lastTicks; m2.lastTicks = t2;
-    long dt3 = t3 - m3.lastTicks; m3.lastTicks = t3;
+    long dticks[2];
+    float v_mps[2];
 
-    // Calcular RPM (Absoluto para el PID)
-    m1.currentRPM = abs((dt1 / (float)CPR) * (60.0 / dt));
-    m2.currentRPM = abs((dt2 / (float)CPR) * (60.0 / dt));
-    m3.currentRPM = abs((dt3 / (float)CPR) * (60.0 / dt));
+    for (int i = 0; i < 2; i++) {
+      // Calcular delta para el PID de velocidad
+      dticks[i] = current_ticks[i] - last_ticks[i];
+      last_ticks[i] = current_ticks[i];
 
-    // Ejecutar PID
-    updatePID(m1, dt);
-    updatePID(m2, dt);
-    updatePID(m3, dt);
+      motor[i].currentRPM = calcularRPM(dticks[i], dt);
+      motor[i].pwmPercent = computePID(motor[i], dt, Kp[i], Ki[i], Kd[i], INTEGRAL_MAX);
+      setMotorPins(IN1[i], IN2[i], motor[i].pwmPercent, motor[i].direction);
+      
+      v_mps[i] = calcularVelocidadMPS(dticks[i], dt);
+    }
 
-    // Mover motores
-    driveMotor(m1, globalDirection);
-    driveMotor(m2, globalDirection);
-    driveMotor(m3, globalDirection);
+    // Paquete UART adaptado: ID, seq, dt_ms, ticksAbs_L, rpm_L, ticksAbs_R, rpm_R
+    Serial.print(ESP_ID);
+    Serial.print(","); Serial.print(seq++); 
+    Serial.print(","); Serial.print(dt_ms);
 
-    // --- ENVIAR TELEMETRÍA ---
-    // Formato: HEADER, seq, dt_ms, t1, r1, t2, r2, t3, r3
-    // Nota: Enviamos ticks crudos acumulados (t1, t2, t3) para que la odometría de Python no pierda posición
-    Serial.print(DEVICE_ID); Serial.print(",");
-    Serial.print(seq++); Serial.print(",");
-    Serial.print((int)(dt * 1000)); Serial.print(",");
-    
-    Serial.print(t1); Serial.print(",");
-    Serial.print(m1.currentRPM, 1); Serial.print(",");
-    
-    Serial.print(t2); Serial.print(",");
-    Serial.print(m2.currentRPM, 1); Serial.print(",");
-    
-    Serial.print(t3); Serial.print(",");
-    Serial.println(m3.currentRPM, 1);
+    for (int i = 0; i < 2; i++) {
+      Serial.print(","); Serial.print(current_ticks[i]);
+      Serial.print(","); Serial.print(motor[i].currentRPM, 2);
+    }
+    Serial.println();
 
     lastSampleTime = now;
   }
