@@ -72,11 +72,11 @@ void IRAM_ATTR encoderISR(void* arg) {
 
   // Secuencia forward:  00→10→11→01→00  (+1 cada transición válida)
   // Secuencia backward: 00→01→11→10→00  (-1 cada transición válida)
-  static const int8_t lookup[16] = {
-     0,  1, -1,  0,
-    -1,  0,  0,  1,
-     1,  0,  0, -1,
-     0, -1,  1,  0
+    static const int8_t lookup[16] = {
+      0,  -1, 1,  0,
+      1,  0,  0,  -1,
+     -1,  0,  0, 1,
+      0, 1,  -1,  0
   };
 
   ticks[i] += lookup[(prev << 2) | state];
@@ -218,12 +218,12 @@ void loop() {
   readSerialLines();
 
     // Failsafe
-    if (millis() - lastCmdMs > CMD_TIMEOUT_MS) {
-      for (int i = 0; i < 3; i++) {
-        motor[i].setpointRPM = 0.0f;
-      motor[i].errorSum    = 0.0f;
-      }
-    }
+//    if (millis() - lastCmdMs > CMD_TIMEOUT_MS) {
+//      for (int i = 0; i < 3; i++) {
+//        motor[i].setpointRPM = 0.0f;
+//      motor[i].errorSum    = 0.0f;
+//      }
+//    }
 
    motor[0].setpointRPM = 40; 
 

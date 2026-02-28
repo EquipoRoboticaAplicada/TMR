@@ -218,12 +218,12 @@ void loop() {
   readSerialLines();
 
     // Failsafe
-    if (millis() - lastCmdMs > CMD_TIMEOUT_MS) {
-      for (int i = 0; i < 3; i++) {
-        motor[i].setpointRPM = 0.0f;
-      motor[i].errorSum    = 0.0f;
-      }
-    }
+//    if (millis() - lastCmdMs > CMD_TIMEOUT_MS) {
+//      for (int i = 0; i < 3; i++) {
+//        motor[i].setpointRPM = 0.0f;
+//      motor[i].errorSum    = 0.0f;
+//      }
+//    }
 
    motor[0].setpointRPM = 40; 
 
