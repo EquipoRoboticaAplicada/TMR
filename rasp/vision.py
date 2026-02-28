@@ -106,7 +106,7 @@ def detect_colors(frame, draw=True):
         
         if found:
             colors.extend([color]*len(c_list))
-            centroida.extend(c_list)
+            centroids.extend(c_list)
             areas.extend(a_list)
 
     return colors, centroids, areas

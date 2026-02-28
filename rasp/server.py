@@ -5,7 +5,8 @@ import serial
         
 # ---- UART ESP32 ----
 UART_LEFT  = "/dev/ttyACM0"
-UART_RIGHT = "/dev/ttyUSB0"  # ejemplo: "/dev/ttyACM1" o "/dev/ttyUSB0"
+UART_RIGHT = None
+# UART_RIGHT = "/dev/ttyUSB0"  # ejemplo: "/dev/ttyACM1" o "/dev/ttyUSB0"
 BAUDRATE = 115200
 
 ser_left = None
