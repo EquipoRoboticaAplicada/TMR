@@ -1,4 +1,5 @@
-const char* ESP_ID = "ESP_L";
+void IRAM_ATTR encoderISR(void* arg);
+const char* ESP_ID = "ESP_R";
 
 // Para IBT-2: IN1 = RPWM, IN2 = LPWM
 // Orden: 0=adelante, 1=en medio, 2=atrás
@@ -59,8 +60,6 @@ String inputBuffer = "";
 
 // ---------------- ISR Encoder x4 (lookup table) ----------------
 // FIX #2: reemplaza la lógica frágil "if (A == B)" por tabla de estados.
-// Secuencia forward:  00→01→11→10→00  (+1 cada transición válida)
-// Secuencia backward: 00→10→11→01→00  (-1 cada transición válida)
 void IRAM_ATTR encoderISR(void* arg) {
   int i = (int)(intptr_t)arg;
 
@@ -71,12 +70,13 @@ void IRAM_ATTR encoderISR(void* arg) {
   int8_t prev  = lastEncState[i];
   lastEncState[i] = state;
 
-  // Tabla de transiciones (prev<<2 | curr) → incremento
+  // Secuencia forward:  00→10→11→01→00  (+1 cada transición válida)
+  // Secuencia backward: 00→01→11→10→00  (-1 cada transición válida)
   static const int8_t lookup[16] = {
-     0, -1,  1,  0,
-     1,  0,  0, -1,
+     0,  1, -1,  0,
     -1,  0,  0,  1,
-     0,  1, -1,  0
+     1,  0,  0, -1,
+     0, -1,  1,  0
   };
 
   ticks[i] += lookup[(prev << 2) | state];
@@ -115,9 +115,12 @@ float computePID(PIDState &m, float dt, float Kp, float Ki, float Kd, float inte
 // Ticks positivos → avance, negativos → retroceso, independientemente del comando.
 float calcularVelocidadMPS(long dticks, float dt_s) {
   if (dt_s <= 0.0f) return 0.0f;
-  float rev    = (float)dticks / (float)CPR_OUTPUT;  // signed
-  float dist_m = rev * WHEEL_CIRC_M;                 // signed
-  return dist_m / dt_s;                              // m/s signed
+  //  float rev    = (float)dticks / (float)CPR_OUTPUT;  // signed
+  //  float dist_m = rev * WHEEL_CIRC_M;                 // signed
+  //  return dist_m / dt_s;                              // m/s signed
+  float rpm = calcularRPM(dticks, dt_s);
+  float m_s = WHEEL_CIRC_M * rpm / 60;
+  return m_s;
 }
 
 void setMotorPins(int in1Pin, int in2Pin, float percent, bool forward) {
@@ -214,19 +217,21 @@ void setup() {
 void loop() {
   readSerialLines();
 
-  // Failsafe
-  if (millis() - lastCmdMs > CMD_TIMEOUT_MS) {
-    for (int i = 0; i < 3; i++) {
-      motor[i].setpointRPM = 0.0f;
-      motor[i].errorSum    = 0.0f;
-    }
-  }
+    // Failsafe
+//    if (millis() - lastCmdMs > CMD_TIMEOUT_MS) {
+//      for (int i = 0; i < 3; i++) {
+//        motor[i].setpointRPM = 0.0f;
+//      motor[i].errorSum    = 0.0f;
+//      }
+//    }
+
+   motor[0].setpointRPM = 40; 
 
   unsigned long now = millis();
   if (now - lastSampleTime >= SAMPLE_MS) {
 
     uint32_t dt_ms = now - lastSampleTime;
-    float    dt    = dt_ms / 1000.0f;
+    float    dt    = fabs(dt_ms) / 1000.0f;
 
     long dticks[3];
 
@@ -246,19 +251,26 @@ void loop() {
       // FIX #3: velocidad con signo real de encoder, no de dirección comandada
       v_mps[i] = calcularVelocidadMPS(dticks[i], dt);
     }
+    
+     // Paquete UART: ID, seq, dt_ms, dticks0, v0, dticks1, v1, dticks2, v2
+      Serial.print(ESP_ID); Serial.print(",");
+      Serial.print(seq++);  Serial.print(",");
+      Serial.print(fabs(dt_ms));
+  
+      for (int i = 0; i < 3; i++) {
+        Serial.print(",");
+        Serial.print(dticks[i]);
+        Serial.print(",");
+        Serial.print(v_mps[i], 4);
+      }
+      Serial.println();
 
-    // Paquete UART: ID, seq, dt_ms, dticks0, v0, dticks1, v1, dticks2, v2
-    Serial.print(ESP_ID); Serial.print(",");
-    Serial.print(seq++);  Serial.print(",");
-    Serial.print(dt_ms);
-
-    for (int i = 0; i < 3; i++) {
-      Serial.print(",");
-      Serial.print(dticks[i]);
-      Serial.print(",");
-      Serial.print(v_mps[i], 4);
-    }
-    Serial.println();
+      // Diagnóstico
+//    Serial.print("SP:");
+//    Serial.print(motor[0].setpointRPM);
+//    Serial.print("\t");
+//    Serial.print("PV:");
+//    Serial.println(calcularRPM(dticks[0], dt));
 
     lastSampleTime = now;
   }
