@@ -443,6 +443,5 @@ class RoverMap:
         self._quit()
 
     def _quit(self):
-        ESP.close()
         pygame.quit()
         print("✅ Visualización cerrada.")

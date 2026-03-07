@@ -2,7 +2,6 @@ import threading
 import platform
 import serial
 import time
-from mapeo_trayectoria import RoverOdometry
 
 class ESP: 
 
@@ -10,23 +9,24 @@ class ESP:
 
     def __init__(self):
         
-        # --- Puertos seriales ---
-        self._ser_left  = None
-        self._ser_right = None
+        # Puertos seriales 
+        self._ser_left  = None # Motores izquierda
+        self._ser_right = None # Motores derecha
         self._lock      = threading.Lock()
 
-    # ------------------------------------------------------------------ #
-    #  Conexión serial                                                     #
-    # ------------------------------------------------------------------ #
+        # Lecturas 
+        self.lectura_odometria_izq = ""
+        self.lectura_odometria_der = ""
 
     def connect(self):
         """Busca y conecta automáticamente los ESP32 por puerto serial."""
         ports = self._get_available_ports()
-        print(f"🔍 Buscando ESPs en: {ports}")
 
         if not ports:
             print("⚠️  No se encontraron puertos seriales.")
             return
+        
+        print(f"🔍 Buscando ESPs en: {ports}")
 
         for port in ports:
             self._try_connect_port(port)
@@ -35,10 +35,14 @@ class ESP:
             print("⚠️  No se detectaron ESPs.")
 
     def _get_available_ports(self) -> list:
-        if platform.system() == "Windows":
-            return [p.device for p in serial.tools.list_ports.comports()]
-        import glob
-        return glob.glob('/dev/ttyUSB*') + glob.glob('/dev/ttyACM*')
+        try: 
+            if platform.system() == "Windows":
+                return [p.device for p in serial.tools.list_ports.comports()]
+            import glob
+            return glob.glob('/dev/ttyUSB*') + glob.glob('/dev/ttyACM*')
+        except Exception as e: 
+            print(f"Error (_get_available_ports(self)): {e}")
+            return None
 
     def _try_connect_port(self, port: str):
         try:
@@ -84,26 +88,21 @@ class ESP:
             print(f"Error conectando a {port}: {e}")
 
     def _read_serial_thread(self, ser_obj, side: str):
-        """Hilo dedicado de lectura serial para un lado del rover."""
         while ser_obj and ser_obj.is_open:
             try:
                 raw = ser_obj.readline()
                 if not raw:
                     continue
-
                 line = raw.decode('utf-8', errors='ignore').strip()
-                # print(line, '\n') # DEBUG
-
-                # lectura para odometría
                 if line.startswith("ESP"):
-                    RoverOdometry._parse_esp_line(line)
-                    RoverOdometry._update_pose()   # integrar posición con cada nueva trama
-
+                    with self._lock:
+                        if side == "left":
+                            self.lectura_odometria_izq = line
+                        else:
+                            self.lectura_odometria_der = line
             except serial.SerialException as e:
                 print(f"Error serial ({side}): {e}")
                 break
-            except Exception as e:
-                print(f"Error leyendo serial ({side}): {e}")
 
     def close(self):
         """Cierra las conexiones seriales."""
