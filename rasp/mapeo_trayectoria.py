@@ -8,7 +8,7 @@ import time
 import math
 import serial
 # import serial.tools.list_ports
-# import threading
+import threading
 # import platform
 import pygame
 from connect import ESP
@@ -34,7 +34,7 @@ class RoverOdometry:
         # # --- Puertos seriales ---
         # self._ser_left  = None
         # self._ser_right = None
-        # self._lock      = threading.Lock()
+        self._lock      = threading.Lock()
 
         # --- Estado crudo de los motores (datos recibidos del ESP) ---
         #     Estructura: 2 lados × 3 motores → {"ticks": int, "m/s": float}
@@ -119,26 +119,26 @@ class RoverOdometry:
     #     except Exception as e:
     #         print(f"Error conectando a {port}: {e}")
 
-    def _read_serial_thread(self, ser_obj, side: str):
-        """Hilo dedicado de lectura serial para un lado del rover."""
-        while ser_obj and ser_obj.is_open:
-            try:
-                raw = ser_obj.readline()
-                if not raw:
-                    continue
+    # def _read_serial_thread(self, ser_obj, side: str):
+    #     """Hilo dedicado de lectura serial para un lado del rover."""
+    #     while ser_obj and ser_obj.is_open:
+    #         try:
+    #             raw = ser_obj.readline()
+    #             if not raw:
+    #                 continue
 
-                line = raw.decode('utf-8', errors='ignore').strip()
-                # print(line, '\n') # DEBUG
+    #             line = raw.decode('utf-8', errors='ignore').strip()
+    #             # print(line, '\n') # DEBUG
 
-                if line.startswith("ESP"):
-                    self._parse_esp_line(line)
-                    self._update_pose()   # integrar posición con cada nueva trama
+    #             if line.startswith("ESP"):
+    #                 self._parse_esp_line(line)
+    #                 self._update_pose()   # integrar posición con cada nueva trama
 
-            except serial.SerialException as e:
-                print(f"Error serial ({side}): {e}")
-                break
-            except Exception as e:
-                print(f"Error leyendo serial ({side}): {e}")
+    #         except serial.SerialException as e:
+    #             print(f"Error serial ({side}): {e}")
+    #             break
+    #         except Exception as e:
+    #             print(f"Error leyendo serial ({side}): {e}")
 
     # ------------------------------------------------------------------ #
     #  Parseo de tramas ESP                                                #

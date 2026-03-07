@@ -2,6 +2,7 @@ import threading
 import platform
 import serial
 import time
+from mapeo_trayectoria import RoverOdometry
 
 class ESP: 
 
@@ -81,6 +82,28 @@ class ESP:
             print(f"No se pudo abrir {port}: {e}")
         except Exception as e:
             print(f"Error conectando a {port}: {e}")
+
+    def _read_serial_thread(self, ser_obj, side: str):
+        """Hilo dedicado de lectura serial para un lado del rover."""
+        while ser_obj and ser_obj.is_open:
+            try:
+                raw = ser_obj.readline()
+                if not raw:
+                    continue
+
+                line = raw.decode('utf-8', errors='ignore').strip()
+                # print(line, '\n') # DEBUG
+
+                # lectura para odometría
+                if line.startswith("ESP"):
+                    RoverOdometry._parse_esp_line(line)
+                    RoverOdometry._update_pose()   # integrar posición con cada nueva trama
+
+            except serial.SerialException as e:
+                print(f"Error serial ({side}): {e}")
+                break
+            except Exception as e:
+                print(f"Error leyendo serial ({side}): {e}")
 
     def close(self):
         """Cierra las conexiones seriales."""
