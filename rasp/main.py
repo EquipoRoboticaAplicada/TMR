@@ -1,3 +1,4 @@
+import threading
 from mapeo_trayectoria import RoverOdometry, RoverMap
 from connect import ESP
 
@@ -14,6 +15,6 @@ if __name__ == "__main__":
     odo = RoverOdometry()
     mapa = RoverMap(odometry=odo)
 
-    # Loops
-    odometry_loop()
+    threading.Thread(target=odometry_loop, daemon=True).start()
+
     mapa.run()
