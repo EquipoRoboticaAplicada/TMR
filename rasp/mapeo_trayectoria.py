@@ -204,8 +204,8 @@ class RoverOdometry:
         with self._lock:
             v_l = self._rover_state["left_side"]["motors"][0]["m/s"]
             v_r = self._rover_state["right_side"]["motors"][0]["m/s"]
-            # print(v_l, '\t')
-            # print(v_r, '\n')
+            print("Velocidades --- ",v_l, '\t')
+            print(v_r, '\n')
 
         v     = (v_l + v_r) / 2.0
         omega = (v_r - v_l) / self.L
@@ -424,7 +424,7 @@ class RoverMap:
 
             # --- Obtener estado del rover ---
             x, y, theta = self.odometry.pose
-            # print(f"X: {x}, Y: {y}, Theta: {theta}") # DEBUG
+            print(f"Mapa --- X: {x}, Y: {y}, Theta: {theta}") # DEBUG
             v, omega     = self.odometry.velocity
 
             # Guardar punto en la trayectoria (evitar duplicados estáticos)
