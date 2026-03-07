@@ -158,18 +158,17 @@ class RoverOdometry:
             if len(parts) < 9:
                 return
             
-            header = parts[0]
-            if header not in ("ESP_L", "ESP_R"):   # ← rechaza cualquier cosa malformada
+            try:
+                header = parts[0]
+                seq    = int(parts[1])
+                dt_ms  = float(parts[2])
+                m_data = [
+                    {"ticks": int(parts[3]), "m/s": float(parts[4])},
+                    {"ticks": int(parts[5]), "m/s": float(parts[6])},
+                    {"ticks": int(parts[7]), "m/s": float(parts[8])},
+                ]
+            except:
                 return
-
-            seq    = int(parts[1])
-            dt_ms  = float(parts[2])
-
-            m_data = [
-                {"ticks": int(parts[3]), "m/s": float(parts[4])},
-                {"ticks": int(parts[5]), "m/s": float(parts[6])},
-                {"ticks": int(parts[7]), "m/s": float(parts[8])},
-            ]
 
             with self._lock:
                 if header == "ESP_L":
