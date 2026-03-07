@@ -29,7 +29,6 @@ ser_left = open_serial(UART_LEFT)
 ser_right = open_serial(UART_RIGHT)
 
 # ----- NUEVO ESTADO DEL ROVER (Reemplazo de control_state) -----
-# Ahora tiene los mismos parámetros que mapeo_trayectoria.py
 rover_state = {
     "left_side":  {"seq": 0, "dt_ms": 0, "motors": [{"ticks": 0, "m/s": 0.0} for _ in range(3)]},
     "right_side": {"seq": 0, "dt_ms": 0, "motors": [{"ticks": 0, "m/s": 0.0} for _ in range(3)]},
