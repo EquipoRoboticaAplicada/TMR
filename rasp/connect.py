@@ -94,12 +94,15 @@ class ESP:
                 if not raw:
                     continue
                 line = raw.decode('utf-8', errors='ignore').strip()
-                if line.startswith("ESP"):
-                    with self._lock:
-                        if side == "left":
-                            self.lectura_odometria_izq = line
-                        else:
-                            self.lectura_odometria_der = line
+                
+                # Solo guardar líneas bien formadas
+                if line.startswith("ESP_L") or line.startswith("ESP_R"):
+                    if len(line.split(',')) >= 9:          # ← estructura mínima válida
+                        with self._lock:
+                            if side == "left":
+                                self.lectura_odometria_izq = line
+                            else:
+                                self.lectura_odometria_der = line
             except serial.SerialException as e:
                 print(f"Error serial ({side}): {e}")
                 break
