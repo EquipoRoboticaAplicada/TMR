@@ -229,7 +229,7 @@ class RoverOdometry:
     @property
     def pose(self) -> tuple:
         """Retorna (x, y, theta) — posición en metros y orientación en rad."""
-        print(f"X: {self._x}, Y: {self._y}, Theta: {self._theta}") # DEBUG
+        # print(f"X: {self._x}, Y: {self._y}, Theta: {self._theta}") # DEBUG
         return (self._x, self._y, self._theta)
 
     @property
