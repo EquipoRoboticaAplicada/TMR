@@ -155,7 +155,7 @@ class RoverOdometry:
         try:
             parts = line.strip().split(',')
 
-            if len(parts) < 9:
+            if len(parts) < 9 or len(parts) > 9:
                 return
             
             try:
