@@ -149,12 +149,19 @@ class RoverOdometry:
         Parsea la trama de telemetría.
         Formato: ESP_L/R, seq, dt_ms, ticks0, v0, ticks1, v1, ticks2, v2
         """
+        if not line:
+            return
+
         try:
             parts = line.strip().split(',')
 
             if len(parts) < 9:
                 return
+            
             header = parts[0]
+            if header not in ("ESP_L", "ESP_R"):   # ← rechaza cualquier cosa malformada
+                return
+
             seq    = int(parts[1])
             dt_ms  = float(parts[2])
 
@@ -223,7 +230,7 @@ class RoverOdometry:
     @property
     def pose(self) -> tuple:
         """Retorna (x, y, theta) — posición en metros y orientación en rad."""
-        # print(f"X: {self._x}, Y: {self._y}, Theta: {self._theta}") # DEBUG
+        print(f"X: {self._x}, Y: {self._y}, Theta: {self._theta}") # DEBUG
         return (self._x, self._y, self._theta)
 
     @property
