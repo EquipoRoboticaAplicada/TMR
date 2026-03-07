@@ -124,12 +124,20 @@ class Sender:
 # ---------------------------
 # Utilidades 
 # ---------------------------
-def send_rpms(sender, left_rpm, right_rpm, dir_left, dir_right):
+def send_rpms(sender, left_rpm, right_rpm, dir_left, dir_right, ticks_left=0, ticks_right=0):
+    # NUEVO: Estructura idéntica a mapeo_trayectoria.py integrando los ticks
+    rover_state = {
+        "left_side":  {"seq": 0, "dt_ms": 0, "motors": [{"ticks": ticks_left, "m/s": 0.0} for _ in range(3)]},
+        "right_side": {"seq": 0, "dt_ms": 0, "motors": [{"ticks": ticks_right, "m/s": 0.0} for _ in range(3)]},
+        "last_update": time.time()
+    }
+
     payload = {
         "left_rpm":  f"S{int(left_rpm)}",
         "right_rpm": f"S{int(right_rpm)}",
         "left_dir":  f"D{int(dir_left)}",
         "right_dir": f"D{int(dir_right)}",
+        "rover_state": rover_state  # Se adjunta el estado al payload
     }
     sender.send_cmd(payload)
 
@@ -199,6 +207,10 @@ def main():
     Y_TRIGGER = 0.40
     Y_HYST = 0.35
 
+    # NUEVO: Variables para simular el avance de los encoders
+    ticks_left = 0
+    ticks_right = 0
+
     while True:
         ok, frame = grabber.read()
         if not ok or frame is None:
@@ -264,9 +276,21 @@ def main():
         left_rpm_c = clamp_rpm(left_rpm, min_rpm=20)
         right_rpm_c = clamp_rpm(right_rpm, min_rpm=20)
 
+        # NUEVO: Simulación de encoders sumando o restando RPMs según la dirección
+        if dir_left == 1:
+            ticks_left += left_rpm_c
+        else:
+            ticks_left -= left_rpm_c
+            
+        if dir_right == 1:
+            ticks_right += right_rpm_c
+        else:
+            ticks_right -= right_rpm_c
+
         command_send_counter += 1
         if command_send_counter >= COMMAND_SEND_EVERY:
-            send_rpms(sender, left_rpm_c, right_rpm_c, dir_left, dir_right)
+            # Mandamos a llamar la función incluyendo los ticks simulados
+            send_rpms(sender, left_rpm_c, right_rpm_c, dir_left, dir_right, ticks_left, ticks_right)
             command_send_counter = 0
 
         vision_send_counter += 1
@@ -286,4 +310,5 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    main()   
+    
