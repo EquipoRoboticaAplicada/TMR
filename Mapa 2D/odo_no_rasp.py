@@ -38,14 +38,8 @@ class RoverOdometry:
         # --- Estado crudo de los motores (datos recibidos del ESP) ---
         #     Estructura: 2 lados × 3 motores → {"ticks": int, "m/s": float}
         self._rover_state = {
-            "left_side":  {
-                "seq": 0, "dt_ms": 0,
-                "motors": [{"ticks": 0, "m/s": 0.0}] * 3
-            },
-            "right_side": {
-                "seq": 0, "dt_ms": 0,
-                "motors": [{"ticks": 0, "m/s": 0.0}] * 3
-            },
+            "left_side":  {"seq": 0, "dt_ms": 0, "motors": [{"ticks": 0, "m/s": 0.0}] * 3},
+            "right_side": {"seq": 0, "dt_ms": 0, "motors": [{"ticks": 0, "m/s": 0.0}] * 3},
             "last_update": 0.0
         }
 
