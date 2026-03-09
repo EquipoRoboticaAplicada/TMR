@@ -110,6 +110,12 @@ class Sender:
 # Utilidades 
 # ---------------------------
 
+def read_odometry(head, seq, dt_ms, m_dt):
+    
+    
+    return 
+
+
 
 def send_rpms(sender, left_rpm, right_rpm, dir_left, dir_right, ticks_left=0, ticks_right=0):
     # NUEVO: Estructura idéntica a mapeo_trayectoria.py integrando los ticks
