@@ -244,42 +244,46 @@ class RoverMap:
     # ------------------------------------------------------------------ #
 
     def run(self):
-        """Inicia el bucle de renderizado. Bloqueante hasta cerrar la ventana."""
-        self._running = True
+        try: 
+            """Inicia el bucle de renderizado. Bloqueante hasta cerrar la ventana."""
+            self._running = True
 
-        while self._running:
-            self._clock.tick(self.fps)
+            while self._running:
+                self._clock.tick(self.fps)
 
-            # --- Eventos ---
-            for event in pygame.event.get():
-                if event.type == pygame.QUIT:
-                    self._running = False
+                # --- Eventos ---
+                for event in pygame.event.get():
+                    if event.type == pygame.QUIT:
+                        self._running = False
 
-                elif event.type == pygame.KEYDOWN:
-                    if event.key == pygame.K_r:          # R → resetear pose
-                        self.odometry.reset_pose()
-                        self._path.clear()
-                        print("🔄 Pose reseteada.")
+                    elif event.type == pygame.KEYDOWN:
+                        if event.key == pygame.K_r:          # R → resetear pose
+                            self.odometry.reset_pose()
+                            self._path.clear()
+                            print("🔄 Pose reseteada.")
 
-            # --- Obtener estado del rover ---
-            x, y, theta = self.odometry.pose
-            # print(f"Mapa --- X: {x}, Y: {y}, Theta: {theta}") # DEBUG
-            v, omega     = self.odometry.velocity
+                # --- Obtener estado del rover ---
+                x, y, theta = self.odometry.pose
+                # print(f"Mapa --- X: {x}, Y: {y}, Theta: {theta}") # DEBUG
+                v, omega     = self.odometry.velocity
 
-            # Guardar punto en la trayectoria (evitar duplicados estáticos)
-            if not self._path or (x, y) != self._path[-1]:
-                self._path.append((x, y))
+                # Guardar punto en la trayectoria (evitar duplicados estáticos)
+                if not self._path or (x, y) != self._path[-1]:
+                    self._path.append((x, y))
 
-            # --- Render ---
-            self._screen.fill(self.BG_COLOR)
-            self._draw_grid()
-            self._draw_path()
-            self._draw_rover(x, y, theta)
-            self._draw_hud(x, y, theta, v, omega)
+                # --- Render ---
+                self._screen.fill(self.BG_COLOR)
+                self._draw_grid()
+                self._draw_path()
+                self._draw_rover(x, y, theta)
+                self._draw_hud(x, y, theta, v, omega)
 
-            pygame.display.flip()
+                pygame.display.flip()
 
-        self._quit()
+            self._quit()
+        except:
+            print("!! Visualización cerrada.")
+            return None
 
     def _quit(self):
         pygame.quit()
