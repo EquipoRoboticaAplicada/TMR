@@ -16,16 +16,19 @@ class ESP:
         self._ser_right = None # Motores derecha
         self._lock      = threading.Lock()
 
-        # Lecturas 
-        self.lectura_odometria_izq = ""
-        self.lectura_odometria_der = ""
+        # Estado del rover (odometría)
+        self._rover_state = {
+            "left_side":  {"seq": 0, "dt_ms": 0.0, "motors": [{"ticks": 0, "m/s": 0.0} for _ in range(3)]},
+            "right_side": {"seq": 0, "dt_ms": 0.0, "motors": [{"ticks": 0, "m/s": 0.0} for _ in range(3)]},
+            "last_update": 0.0
+        }
 
     def connect(self):
         """Busca y conecta automáticamente los ESP32 por puerto serial."""
         ports = self._get_available_ports()
 
         if not ports:
-            print("⚠️  No se encontraron puertos seriales.")
+            print("⚠️  No se encontraron puertos seriales.\n")
             return
         
         print(f"🔍 Buscando ESPs en: {ports}")
@@ -34,7 +37,7 @@ class ESP:
             self._try_connect_port(port)
 
         if self._ser_left is None and self._ser_right is None:
-            print("⚠️  No se detectaron ESPs.")
+            print("⚠️  No se detectaron ESPs.\n")
 
     def _get_available_ports(self) -> list:
         try: 
@@ -43,7 +46,7 @@ class ESP:
             import glob
             return glob.glob('/dev/ttyUSB*') + glob.glob('/dev/ttyACM*')
         except Exception as e: 
-            print(f"Error (_get_available_ports(self)): {e}")
+            # print(f"connect.py error: (_get_available_ports()); {e}\n")
             return None
 
     def _try_connect_port(self, port: str):
@@ -81,7 +84,7 @@ class ESP:
                         break
 
             if not identified:
-                print(f"⚠️  No se identificó ESP en {port} (cerrando).")
+                print(f"⚠️  No se identificó ESP en {port} (cerrando).\n")
                 s.close()
 
         except serial.SerialException as e:
@@ -97,29 +100,78 @@ class ESP:
                     continue
                 line = raw.decode('utf-8', errors='ignore').strip()
                 
-                # Solo guardar líneas bien formadas
+                # Parsear y actualizar rover_state
                 if line.startswith("ESP_L") or line.startswith("ESP_R"):
-                    if len(line.split(',')) >= 9:          # ← estructura mínima válida
-                        with self._lock:
-                            if side == "left":
-                                self.lectura_odometria_izq = line
-                            else:
-                                self.lectura_odometria_der = line
+                    self._parse_esp_line(line)
             except serial.SerialException as e:
                 print(f"Error serial ({side}): {e}")
                 break
 
-    def send_uart(left_dir, left_rpm, right_dir, right_rpm):
+    def _parse_esp_line(self, line: str):
+        """
+        Parsea la trama de telemetría y actualiza _rover_state.
+        Formato: ESP_L/R, seq, dt_ms, ticks0, v0, ticks1, v1, ticks2, v2
+        """
+        if not line:
+            return
+
+        try:
+            parts = line.strip().split(',')
+
+            if len(parts) != 9:
+                return
+
+            try:
+                header = parts[0]
+                seq    = int(parts[1])
+                dt_ms  = float(parts[2])
+                m_data = [
+                    {"ticks": int(parts[3]), "m/s": float(parts[4])},
+                    {"ticks": int(parts[5]), "m/s": float(parts[6])},
+                    {"ticks": int(parts[7]), "m/s": float(parts[8])},
+                ]
+            except (ValueError, IndexError):
+                return
+
+            with self._lock:
+                if header == "ESP_L":
+                    self._rover_state["left_side"].update(
+                        {"seq": seq, "dt_ms": dt_ms, "motors": m_data}
+                    )
+                elif header == "ESP_R":
+                    self._rover_state["right_side"].update(
+                        {"seq": seq, "dt_ms": dt_ms, "motors": m_data}
+                    )
+                else:
+                    return  # Header desconocido, ignorar
+
+                self._rover_state["last_update"] = time.time()
+
+        except ValueError as e:
+            print(f"[parse] ValueError en: {repr(line)} → {e}")
+        except Exception as e:
+            print(f"[parse] Error inesperado: {repr(line)} → {e}")
+
+    def get_rover_state(self) -> dict:
+        """
+        Devuelve una copia segura del rover_state actual.
+        Usar siempre esta función desde server.py, nunca acceder a _rover_state directamente.
+        """
+        import copy
+        with self._lock:
+            return copy.deepcopy(self._rover_state)
+
+    def send_uart(self, left_dir: str, left_rpm: str, right_dir: str, right_rpm: str):
         """
         Envía comandos ya formateados tipo 'D1' y 'S20' (con newline).
         """
-        if ESP._ser_left:
-            ESP._ser_left.write((left_dir + "\n").encode())
-            ESP._ser_left.write((left_rpm + "\n").encode())
+        if self._ser_left:
+            self._ser_left.write((left_dir + "\n").encode())
+            self._ser_left.write((left_rpm + "\n").encode())
 
-        if ESP._ser_right:
-            ESP._ser_right.write((right_dir + "\n").encode())
-            ESP._ser_right.write((right_rpm + "\n").encode())
+        if self._ser_right:
+            self._ser_right.write((right_dir + "\n").encode())
+            self._ser_right.write((right_rpm + "\n").encode())
 
     def close(self):
         """Cierra las conexiones seriales."""
@@ -127,4 +179,4 @@ class ESP:
             self._ser_left.close()
         if self._ser_right and self._ser_right.is_open:
             self._ser_right.close()
-        print("🛑 Conexiones seriales cerradas.")
+        print("🛑 Conexiones seriales cerradas.\n")
