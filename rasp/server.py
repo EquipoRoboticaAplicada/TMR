@@ -1,32 +1,34 @@
+# Envío y recepción de datos PC - Raspberry Pi 5
+
 from flask import Flask, Response, request, jsonify
 from video_stream import gen_frames
 import time
-import serial
+from connect import ESP
 import threading
 
 # ---- UART ESP32 ----
-UART_LEFT  = "/dev/ttyACM0"
-UART_RIGHT = None
-# UART_RIGHT = "/dev/ttyUSB0"  # ejemplo: "/dev/ttyACM1" o "/dev/ttyUSB0"
-BAUDRATE = 115200
+# UART_LEFT  = "/dev/ttyACM0"
+# UART_RIGHT = None
+# # UART_RIGHT = "/dev/ttyUSB0"  # ejemplo: "/dev/ttyACM1" o "/dev/ttyUSB0"
+# BAUDRATE = 115200
 
-ser_left = None
-ser_right = None
+# ser_left = None
+# ser_right = None
 serial_lock = threading.Lock() # Lock para proteger el acceso al estado
 
-def open_serial(port):
-    if not port:
-        return None
-    try:
-        s = serial.Serial(port, BAUDRATE, timeout=0.05)
-        print(f"UART abierto: {port}")
-        return s
-    except Exception as e:
-        print(f"Error abriendo UART {port}: {e}")
-        return None
+# def open_serial(port):
+#     if not port:
+#         return None
+#     try:
+#         s = serial.Serial(port, BAUDRATE, timeout=0.05)
+#         print(f"UART abierto: {port}")
+#         return s
+#     except Exception as e:
+#         print(f"Error abriendo UART {port}: {e}")
+#         return None
 
-ser_left = open_serial(UART_LEFT)
-ser_right = open_serial(UART_RIGHT)
+# ser_left = open_serial(UART_LEFT)
+# ser_right = open_serial(UART_RIGHT)
 
 # ----- NUEVO ESTADO DEL ROVER (Reemplazo de control_state) -----
 rover_state = {
@@ -72,27 +74,27 @@ def parse_esp_line(line):
     except Exception as e:
         pass # Ignorar errores de parseo por ruido en serial
 
-def read_serial_thread(ser_obj):
-    """Hilo que escucha constantemente un puerto Serial para recibir la odometría."""
-    while ser_obj and ser_obj.is_open:
-        try:
-            raw = ser_obj.readline()
-            if not raw:
-                continue
+# def read_serial_thread(ser_obj):
+#     """Hilo que escucha constantemente un puerto Serial para recibir la odometría."""
+#     while ser_obj and ser_obj.is_open:
+#         try:
+#             raw = ser_obj.readline()
+#             if not raw:
+#                 continue
             
-            line = raw.decode('utf-8', errors='ignore').strip()
-            if line.startswith("ESP"):
-                parse_esp_line(line)
+#             line = raw.decode('utf-8', errors='ignore').strip()
+#             if line.startswith("ESP"):
+#                 parse_esp_line(line)
 
-        except Exception as e:
-            print(f"Error leyendo serial: {e}")
-            break
+#         except Exception as e:
+#             print(f"Error leyendo serial: {e}")
+#             break
 
-# Iniciar los hilos de lectura serial si los puertos están abiertos
-if ser_left:
-    threading.Thread(target=read_serial_thread, args=(ser_left,), daemon=True).start()
-if ser_right:
-    threading.Thread(target=read_serial_thread, args=(ser_right,), daemon=True).start()
+# # Iniciar los hilos de lectura serial si los puertos están abiertos
+# if ser_left:
+#     threading.Thread(target=read_serial_thread, args=(ser_left,), daemon=True).start()
+# if ser_right:
+#     threading.Thread(target=read_serial_thread, args=(ser_right,), daemon=True).start()
 
 
 # ================= FUNCIONES DE CONTROL =================
@@ -102,17 +104,17 @@ def valid_S(x):
 def valid_D(x):
     return isinstance(x, str) and x in ("D0", "D1")
 
-def send_uart(left_dir, left_rpm, right_dir, right_rpm):
-    """
-    Envía comandos ya formateados tipo 'D1' y 'S20' (con newline).
-    """
-    if ser_left:
-        ser_left.write((left_dir + "\n").encode())
-        ser_left.write((left_rpm + "\n").encode())
+# def send_uart(left_dir, left_rpm, right_dir, right_rpm):
+#     """
+#     Envía comandos ya formateados tipo 'D1' y 'S20' (con newline).
+#     """
+#     if ESP._ser_left:
+#         ESP._ser_left.write((left_dir + "\n").encode())
+#         ESP._ser_left.write((left_rpm + "\n").encode())
 
-    if ser_right:
-        ser_right.write((right_dir + "\n").encode())
-        ser_right.write((right_rpm + "\n").encode())
+#     if ESP._ser_right:
+#         ESP._ser_right.write((right_dir + "\n").encode())
+#         ESP._ser_right.write((right_rpm + "\n").encode())
 
 
 # ================= FLASK =================
@@ -123,19 +125,24 @@ def video_feed():
     return Response(gen_frames(),
                     mimetype="multipart/x-mixed-replace; boundary=frame")
 
-@app.route("/telemetry", methods=["GET"])
-def telemetry():
-    """
-    NUEVO ENDPOINT: Devuelve el estado actual de los motores (odometría) a la PC.
-    """
-    with serial_lock:
-        return jsonify({
-            "status": "ok", 
-            "rover_state": rover_state
-        })
+@app.route("/send_speed_dir")
+def send_speed_dir(izq, der):
+    return Response(gen_frames(),
+                    mimetype="multipart/x-mixed-replace; boundary=frame")
 
-@app.route("/command", methods=["POST"])
-def command():
+# @app.route("/telemetry", methods=["GET"])
+# def telemetry():
+#     """
+#     NUEVO ENDPOINT: Devuelve el estado actual de los motores (odometría) a la PC.
+#     """
+#     with serial_lock:
+#         return jsonify({
+#             "status": "ok", 
+#             "rover_state": rover_state
+#         })
+
+@app.route("/rcv_speed_dir", methods=["POST"])
+def rcv_speed_dir():
     """
     Maneja los comandos enviados desde la PC.
     """
@@ -151,26 +158,26 @@ def command():
     if not valid_D(left_dir):   left_dir = "D1"
     if not valid_D(right_dir):  right_dir = "D1"
 
-    try:
-        send_uart(left_dir, left_rpm, right_dir, right_rpm)
-    except Exception as e:
-        print("Error UART:", e)
+    # try:
+    #     send_uart(left_dir, left_rpm, right_dir, right_rpm)
+    # except Exception as e:
+    #     print("Error UART:", e)
 
-    # Ahora retornamos el rover_state para que la PC pueda ver la odometría como respuesta al comando
-    with serial_lock:
-        return jsonify({"status": "ok", "rover_state": rover_state})
+    # # Ahora retornamos el rover_state para que la PC pueda ver la odometría como respuesta al comando
+    # with serial_lock:
+    #     return jsonify({"status": "ok", "rover_state": rover_state})
 
-@app.route("/vision_data", methods=["POST"])
-def vision_data():
-    global vision_state
+# @app.route("/vision_data", methods=["POST"])
+# def vision_data():
+#     global vision_state
 
-    data = request.get_json(force=True) or {}
-    vision_state["colors"] = data.get("colors", [])
-    vision_state["centroids"] = data.get("centroids", [])
-    vision_state["areas"] = data.get("areas", [])
-    vision_state["time"] = data.get("time", time.time())
+#     data = request.get_json(force=True) or {}
+#     vision_state["colors"] = data.get("colors", [])
+#     vision_state["centroids"] = data.get("centroids", [])
+#     vision_state["areas"] = data.get("areas", [])
+#     vision_state["time"] = data.get("time", time.time())
 
-    return jsonify({"status": "ok"})
+#     return jsonify({"status": "ok"})
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000, threaded=True)

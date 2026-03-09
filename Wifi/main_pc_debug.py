@@ -17,7 +17,6 @@ VIDEO_URL  = f"http://{PI_IP}:5000/video_feed"
 CMD_URL    = f"http://{PI_IP}:5000/command"
 VISION_URL = f"http://{PI_IP}:5000/vision_data"
 
-
 # ---------------------------
 # Hilo de captura (latest-frame)
 # ---------------------------

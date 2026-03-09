@@ -1,3 +1,5 @@
+# Programa de conexión Raspberry Pi 5 - ESP32
+
 import threading
 import platform
 import serial
@@ -106,6 +108,18 @@ class ESP:
             except serial.SerialException as e:
                 print(f"Error serial ({side}): {e}")
                 break
+
+    def send_uart(left_dir, left_rpm, right_dir, right_rpm):
+        """
+        Envía comandos ya formateados tipo 'D1' y 'S20' (con newline).
+        """
+        if ESP._ser_left:
+            ESP._ser_left.write((left_dir + "\n").encode())
+            ESP._ser_left.write((left_rpm + "\n").encode())
+
+        if ESP._ser_right:
+            ESP._ser_right.write((right_dir + "\n").encode())
+            ESP._ser_right.write((right_rpm + "\n").encode())
 
     def close(self):
         """Cierra las conexiones seriales."""

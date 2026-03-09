@@ -31,5 +31,4 @@ if __name__ == "__main__":
     mapa = RoverMap(odometry=odo)
 
     threading.Thread(target=odometry_loop, daemon=True).start()
-
     mapa.run()
