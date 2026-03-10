@@ -252,14 +252,13 @@ void loop() {
       v_mps[i] = calcularVelocidadMPS(dticks[i], dt);
     }
     
-     // Paquete UART: ID, seq, dt_ms, dticks0, v0, dticks1, v1, dticks2, v2
+     // Paquete UART: ID, seq, rpm0, v0, rpm1, v1, rpm2, v2
       Serial.print(ESP_ID); Serial.print(",");
       Serial.print(seq++);  Serial.print(",");
-      Serial.print(fabs(dt_ms));
-  
+
       for (int i = 0; i < 3; i++) {
         Serial.print(",");
-        Serial.print(dticks[i]);
+        Serial.print(motor[i].currentRPM, 2);
         Serial.print(",");
         Serial.print(v_mps[i], 4);
       }

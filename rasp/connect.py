@@ -18,8 +18,8 @@ class ESP:
 
         # Estado del rover (odometría)
         self._rover_state = {
-            "left_side":  {"seq": 0, "dt_ms": 0.0, "motors": [{"ticks": 0, "m/s": 0.0} for _ in range(3)]},
-            "right_side": {"seq": 0, "dt_ms": 0.0, "motors": [{"ticks": 0, "m/s": 0.0} for _ in range(3)]},
+            "left_side":  {"seq": 0, "motors": [{"rpm": 0.0, "m/s": 0.0} for _ in range(3)]},
+            "right_side": {"seq": 0, "motors": [{"rpm": 0.0, "m/s": 0.0} for _ in range(3)]},
             "last_update": 0.0
         }
 
@@ -118,17 +118,16 @@ class ESP:
         try:
             parts = line.strip().split(',')
 
-            if len(parts) != 9:
+            if len(parts) != 8:
                 return
 
             try:
                 header = parts[0]
                 seq    = int(parts[1])
-                dt_ms  = float(parts[2])
                 m_data = [
-                    {"ticks": int(parts[3]), "m/s": float(parts[4])},
-                    {"ticks": int(parts[5]), "m/s": float(parts[6])},
-                    {"ticks": int(parts[7]), "m/s": float(parts[8])},
+                    {"rpm": float(parts[2]), "m/s": float(parts[3])},
+                    {"rpm": float(parts[4]), "m/s": float(parts[5])},
+                    {"rpm": float(parts[6]), "m/s": float(parts[7])},
                 ]
             except (ValueError, IndexError):
                 return
@@ -136,11 +135,11 @@ class ESP:
             with self._lock:
                 if header == "ESP_L":
                     self._rover_state["left_side"].update(
-                        {"seq": seq, "dt_ms": dt_ms, "motors": m_data}
+                        {"seq": seq, "motors": m_data}
                     )
                 elif header == "ESP_R":
                     self._rover_state["right_side"].update(
-                        {"seq": seq, "dt_ms": dt_ms, "motors": m_data}
+                        {"seq": seq, "motors": m_data}
                     )
                 else:
                     return  # Header desconocido, ignorar
