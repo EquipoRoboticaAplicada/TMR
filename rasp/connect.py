@@ -30,14 +30,15 @@ class ESP:
         if not ports:
             print("⚠️  No se encontraron puertos seriales.\n")
             return
+        else:
+            print(f"🔍 Buscando ESPs en: {ports}")
+            for port in ports:
+                self._try_connect_port(port)
         
-        print(f"🔍 Buscando ESPs en: {ports}")
-
-        for port in ports:
-            self._try_connect_port(port)
 
         if self._ser_left is None and self._ser_right is None:
             print("⚠️  No se detectaron ESPs.\n")
+            return
 
     def _get_available_ports(self) -> list:
         try: 
@@ -110,7 +111,7 @@ class ESP:
     def _parse_esp_line(self, line: str):
         """
         Parsea la trama de telemetría y actualiza _rover_state.
-        Formato: ESP_L/R, seq, dt_ms, ticks0, v0, ticks1, v1, ticks2, v2
+        Formato: ESP_L/R, seq, ticks0, v0, ticks1, v1, ticks2, v2
         """
         if not line:
             return
@@ -142,6 +143,7 @@ class ESP:
                         {"seq": seq, "motors": m_data}
                     )
                 else:
+                    print("Header: ESP_L/R, no reconocido.\n")
                     return  # Header desconocido, ignorar
 
                 self._rover_state["last_update"] = time.time()
