@@ -1,14 +1,7 @@
 import threading
 import time
-from mapeo_trayectoria import RoverOdometry, RoverMap
 from connect import ESP
 import server
-
-def odometry_loop(odo: RoverOdometry):
-    """Integra la pose del rover a alta frecuencia."""
-    while True:
-        odo._update_pose()
-        time.sleep(0.005)   # 200 Hz
 
 def control_loop(esp: ESP):
     """Consume command_state y envía comandos UART a los ESP32."""
@@ -31,14 +24,6 @@ if __name__ == "__main__":
     # 2. Inyectar ESP en server.py antes de que lleguen requests
     server.init_app(esp)
 
-    # 3. Odometría y visualización
-    odo  = RoverOdometry(esp)
-    mapa = RoverMap(odometry=odo)
-
-    # 4. Hilos secundarios
-    threading.Thread(target=odometry_loop, args=(odo,),  daemon=True).start()
+    # 3. Hilos secundarios
     threading.Thread(target=control_loop,  args=(esp,),  daemon=True).start()
     threading.Thread(target=flask_loop,                  daemon=True).start()
-
-    # 5. Bucle principal: pygame (bloqueante)
-    mapa.run()
