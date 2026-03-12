@@ -254,7 +254,7 @@ void loop() {
     
      // Paquete UART: ID, seq, rpm0, v0, rpm1, v1, rpm2, v2
       Serial.print(ESP_ID); Serial.print(",");
-      Serial.print(seq++);  Serial.print(",");
+      Serial.print(seq++); 
 
       for (int i = 0; i < 3; i++) {
         Serial.print(",");
