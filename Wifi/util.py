@@ -109,10 +109,12 @@ class ImgProcessor:
                     mode_rotate = False
 
                 if mode_rotate:
-                    rot = APPROACH_RPM * abs(turn)
-                    if abs(turn) < 0.1:
+                    rot = 20 + 20 * abs(turn)
+                    if turn == 0.0:
                         left_rpm = right_rpm = 0
                         dir_left = dir_right = 1
+                        sender.send_rpms(0, 0, dir_left, dir_right)
+                        command_send_counter = 0
                     elif turn > 0:
                         left_rpm = right_rpm = rot
                         dir_left, dir_right  = 0, 1
@@ -257,15 +259,18 @@ class Receiver:
 
 # --------------- Tools -------------------
 
-def calc_turn_x(centroid, frame_width, deadband_px=10):
+def calc_turn_x(centroid, frame_width, deadband_px=50):
     cx = centroid[1]
     center_x = frame_width / 2
     error_px = cx - center_x
+
     if abs(error_px) < deadband_px:
         return 0.0
+    
     error = error_px / (frame_width / 2)
-    Kp = 5
+    Kp = 1
     turn = Kp * error
+
     return max(-1.0, min(1.0, turn))
 
 def pick_target(centroids, areas, area_min=1500):
