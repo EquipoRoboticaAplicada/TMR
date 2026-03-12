@@ -132,6 +132,7 @@ class ESP:
                     {"rpm": float(parts[6]), "m/s": float(parts[7])},
                 ]
             except (ValueError, IndexError):
+                print("[_parse_esp_line] Error.\n")
                 return
 
             with self._lock:
