@@ -16,18 +16,14 @@ def flask_loop():
     """Corre el servidor Flask en su propio hilo."""
     server.app.run(host="0.0.0.0", port=5000, threaded=True)
 
-def esp_connect():
-    esp.connect()
-
 if __name__ == "__main__":
     # 1. Conexión serial — fuente única de verdad
     esp = ESP()
-    # esp.connect()
+    esp.connect()
 
     # 2. Inyectar ESP en server.py antes de que lleguen requests
     server.init_app(esp)
 
     # 3. Hilos secundarios
-    threading.Thread(target=esp_connect,                 daemon=True).start()
     threading.Thread(target=control_loop,  args=(esp,),  daemon=True).start()
     threading.Thread(target=flask_loop,                  daemon=True).start()
