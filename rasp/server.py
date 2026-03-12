@@ -45,6 +45,7 @@ def video_feed():
 @app.route("/telemetry", methods=["GET"])
 def telemetry():
     """Devuelve el estado actual de los motores (odometría) a la PC."""
+    print({"rover_state":esp.get_rover_state()})
     return jsonify({"rover_state":esp.get_rover_state()})
 
 @app.route("/rcv_speed_dir", methods=["POST"])

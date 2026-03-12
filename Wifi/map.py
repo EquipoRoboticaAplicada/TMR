@@ -131,12 +131,15 @@ class RoverMap:
     # ------------------------------------------------------------------ #
 
     def run(self):
-        try: 
-            """Inicia el bucle de renderizado. Bloqueante hasta cerrar la ventana."""
+        """Inicia el bucle de renderizado. Bloqueante hasta cerrar la ventana."""
+        try:
             self._running = True
 
             while self._running:
                 self._clock.tick(self.fps)
+
+                # --- Actualizar odometría en el mismo hilo que el render ---
+                self.odometry._update_pose()
 
                 # --- Eventos ---
                 for event in pygame.event.get():
@@ -144,14 +147,13 @@ class RoverMap:
                         self._running = False
 
                     elif event.type == pygame.KEYDOWN:
-                        if event.key == pygame.K_r:          # R → resetear pose
+                        if event.key == pygame.K_r:
                             self.odometry.reset_pose()
                             self._path.clear()
                             print("🔄 Pose reseteada.")
 
                 # --- Obtener estado del rover ---
                 x, y, theta = self.odometry.pose
-                # print(f"Mapa --- X: {x}, Y: {y}, Theta: {theta}") # DEBUG
                 v, omega     = self.odometry.velocity
 
                 # Guardar punto en la trayectoria (evitar duplicados estáticos)
@@ -168,9 +170,8 @@ class RoverMap:
                 pygame.display.flip()
 
             self._quit()
-        except:
-            print("!! Visualización cerrada.")
-            return None
+        except Exception as e:
+            print(f"!! Error en visualización: {e}")
 
     def _quit(self):
         pygame.quit()

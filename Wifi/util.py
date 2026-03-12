@@ -227,7 +227,7 @@ class Receiver:
         with self.lock:
             return copy.deepcopy(self._rover_state)
 
-    def read_odometry(self, timeout: float = 0.3) -> dict | None:
+    def read_odometry(self, timeout: float = 0.5) -> dict | None:
         try:
             r = requests.get(self.telemetry, timeout=timeout)
             r.raise_for_status()
