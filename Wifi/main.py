@@ -7,8 +7,8 @@ PI_IP = "192.168.1.80"
 
 if __name__ == "__main__":
     # 1. ComunicaciónXN
-    # sender  = Sender(PI_IP).start()
-    # grabber = ImgProcessor(PI_IP).start()
+    sender  = Sender(PI_IP).start()
+    grabber = ImgProcessor(PI_IP).start()
 
     # 2. Odometría
     odo  = RoverOdometry(PI_IP)
@@ -16,17 +16,17 @@ if __name__ == "__main__":
 
     # 3. Visión + control en hilo secundario
     #    run_tracker no llama cv.imshow para no competir con pygame en el main thread
-    # threading.Thread(
-    #     target=grabber.run_tracker,
-    #     args=(sender,),
-    #     daemon=True
-    # ).start()
+    threading.Thread(
+        target=grabber.run_tracker,
+        args=(sender,),
+        daemon=True
+    ).start()
 
     # 4. Mapa pygame — bloqueante en main thread
     #    _update_pose() se llama dentro de mapa.run() en cada frame
     try:
         mapa.run()
     finally:
-        # grabber.stop()
-        # sender.stop()
+        grabber.stop()
+        sender.stop()
         odo.stop()

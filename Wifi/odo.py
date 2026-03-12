@@ -56,7 +56,7 @@ class RoverOdometry:
         """
         # 1. Obtener estado fresco — no bloquea, Receiver lo actualiza en background
         new_state = self._receiver.rover_state
-        print(self._receiver._rover_state)
+        # print(self._receiver._rover_state) # Debug
         with self._state_lock:
             self._state = new_state
 
