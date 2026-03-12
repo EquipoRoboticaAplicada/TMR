@@ -160,7 +160,7 @@ class ESP:
         """
         import copy
         with self._lock:
-            print(copy.deepcopy(self._rover_state))
+            print((self._rover_state))
             return copy.deepcopy(self._rover_state)
 
     def send_uart(self, left_dir: str, left_rpm: str, right_dir: str, right_rpm: str):
