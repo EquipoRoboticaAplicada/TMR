@@ -117,7 +117,7 @@ class ESP:
             return
 
         try:
-            print(line)
+            # print(line)
             parts = line.strip().split(',')
 
             if len(parts) != 8:
@@ -162,7 +162,7 @@ class ESP:
         """
         import copy
         with self._lock:
-            print((self._rover_state)) # Debug
+            # print((self._rover_state)) # Debug
             return copy.deepcopy(self._rover_state)
 
     def send_uart(self, left_dir: str, left_rpm: str, right_dir: str, right_rpm: str):
