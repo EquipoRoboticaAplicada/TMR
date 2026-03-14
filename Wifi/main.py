@@ -2,6 +2,7 @@ import threading
 from util import ImgProcessor, Sender
 from odo import RoverOdometry
 from map import RoverMap
+from command import send_motor_command
 
 PI_IP = "192.168.1.80"
 
@@ -21,6 +22,9 @@ if __name__ == "__main__":
         args=(sender,),
         daemon=True
     ).start()
+
+
+    
 
     # 4. Mapa pygame — bloqueante en main thread
     #    _update_pose() se llama dentro de mapa.run() en cada frame
