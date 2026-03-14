@@ -8,7 +8,7 @@ from vision import detect_colors, crosslines
 # Hilo de captura (latest-frame)
 # ---------------------------
 class ImgProcessor:
-    def __init__(self, PI_IP, warmup_sec=0.0):
+    def __init__(self, PI_IP, warmup_sec=0.0, vision_override=None):
         self.video_url = f"http://{PI_IP}:5000/video_feed"
         self.cap = cv.VideoCapture(self.video_url)
         if not self.cap.isOpened():
@@ -19,6 +19,7 @@ class ImgProcessor:
         self.ok = False
         self.stop_event = threading.Event()
         self.thread = threading.Thread(target=self._run, daemon=True)
+        self.vision_override = vision_override
 
         if warmup_sec > 0:
             t0 = time.time()
@@ -89,51 +90,53 @@ class ImgProcessor:
             # Transiciones tracking
             if (not tracking) and (seen_count >= N_ENTER):
                 tracking = True
+                if self.vision_override:
+                    self.vision_override.set()
+                    
             if tracking and (lost_count >= N_EXIT):
                 tracking    = False
                 mode_rotate = False
+                if self.vision_override:
+                    self.vision_override.clear()
 
-            if not tracking:
-                left_rpm = right_rpm = CRUISE_RPM
-                dir_left = dir_right = 1
+            # Lógica de seguimiento y envío de comandos EXCLUSIVO durante el tracking
+            if tracking:
+                if detected:
+                    h, w = frame.shape[:2]
+                    cy   = centroid[2]
+                    turn = calc_turn_x(centroid, w)
 
-            # Lógica de seguimiento
-            if tracking and detected:
-                h, w = frame.shape[:2]
-                cy   = centroid[2]
-                turn = calc_turn_x(centroid, w)
+                    if (not mode_rotate) and (cy >= h * Y_TRIGGER):
+                        mode_rotate = True
+                    elif mode_rotate and (cy < h * Y_HYST):
+                        mode_rotate = False
 
-                if (not mode_rotate) and (cy >= h * Y_TRIGGER):
-                    mode_rotate = True
-                elif mode_rotate and (cy < h * Y_HYST):
-                    mode_rotate = False
-
-                if mode_rotate:
-                    rot = 20 + 20 * abs(turn)
-                    if turn == 0.0:
-                        left_rpm = right_rpm = 0
-                        dir_left = dir_right = 1
-                        sender.send_rpms(0, 0, dir_left, dir_right)
-                        command_send_counter = 0
-                    elif turn > 0:
-                        left_rpm = right_rpm = rot
-                        dir_left, dir_right  = 1, 0
+                    if mode_rotate:
+                        rot = 20 + 20 * abs(turn)
+                        if turn == 0.0:
+                            left_rpm = right_rpm = 0
+                            dir_left = dir_right = 1
+                            sender.send_rpms(0, 0, dir_left, dir_right)
+                            command_send_counter = 0
+                        elif turn > 0:
+                            left_rpm = right_rpm = rot
+                            dir_left, dir_right  = 1, 0
+                        else:
+                            left_rpm = right_rpm = rot
+                            dir_left, dir_right  = 0, 1
                     else:
-                        left_rpm = right_rpm = rot
-                        dir_left, dir_right  = 0, 1
-                else:
-                    left_rpm = right_rpm = APPROACH_RPM
-                    dir_left = dir_right = 1
+                        left_rpm = right_rpm = APPROACH_RPM
+                        dir_left = dir_right = 1
 
-            # Envío de comandos
-            command_send_counter += 1
-            if command_send_counter >= COMMAND_SEND_EVERY:
-                sender.send_rpms(
-                    clamp_rpm(left_rpm),
-                    clamp_rpm(right_rpm),
-                    dir_left, dir_right
-                )
-                command_send_counter = 0
+                # Envío de comandos
+                command_send_counter += 1
+                if command_send_counter >= COMMAND_SEND_EVERY:
+                    sender.send_rpms(
+                        clamp_rpm(left_rpm),
+                        clamp_rpm(right_rpm),
+                        dir_left, dir_right
+                    )
+                    command_send_counter = 0
 
             video = crosslines(frame.copy())
             cv.imshow("VISION ROVER (PC DEBUG)", video)
@@ -153,7 +156,6 @@ class ImgProcessor:
 # Hilo para envíos HTTP
 # ---------------------------
 class Sender:
-
     def __init__(self, PI_IP):
         self.cmd_url = f"http://{PI_IP}:5000/rcv_speed_dir"
         self.session = requests.Session()
@@ -185,7 +187,6 @@ class Sender:
             with self.lock:
                 rpm = self.latest_rpm
                 self.latest_rpm = None
-            # KeyboardInterrupt y errores de programación. Se acota a errores de red.
             try:
                 if rpm is not None:
                     self.session.post(self.cmd_url, json=rpm, timeout=0.2)
@@ -205,7 +206,6 @@ class Sender:
 # ---------------------------
 class Receiver:
     def __init__(self, PI_IP, poll_hz: float = 20.0):
-        # TimeoutError en construcción — el error ocurre al hacer el request.
         self.telemetry      = f"http://{PI_IP}:5000/telemetry"
         self.lock           = threading.Lock()
         self.stop_event     = threading.Event()
@@ -224,7 +224,6 @@ class Receiver:
 
     @property
     def rover_state(self) -> dict:
-        """Retorna una copia segura del último rover_state recibido."""
         import copy
         with self.lock:
             return copy.deepcopy(self._rover_state)
@@ -244,7 +243,6 @@ class Receiver:
         return None
 
     def _run(self):
-        """Consulta /telemetry periódicamente y actualiza _rover_state."""
         while not self.stop_event.is_set():
             state = self.read_odometry()
             if state is not None:
