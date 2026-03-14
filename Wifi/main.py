@@ -3,7 +3,7 @@ from util import ImgProcessor, Sender
 from odo import RoverOdometry
 from map import RoverMap
 
-PI_IP = "192.168.1.80"
+PI_IP = "172.32.236.53"
 
 if __name__ == "__main__":
     # 1. ComunicaciónXN
