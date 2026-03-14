@@ -2,7 +2,7 @@ import threading
 from util import ImgProcessor, Sender
 from odo import RoverOdometry
 from map import RoverMap
-from command import send_motor_command
+from command import Route_Command
 
 PI_IP = "172.32.236.53"
 
@@ -24,7 +24,6 @@ if __name__ == "__main__":
     ).start()
 
 
-    
 
     # 4. Mapa pygame — bloqueante en main thread
     #    _update_pose() se llama dentro de mapa.run() en cada frame
@@ -34,3 +33,7 @@ if __name__ == "__main__":
         grabber.stop()
         sender.stop()
         odo.stop()
+
+    # 5. Ruta predefinida para el rover
+
+    route=Route_Command()
