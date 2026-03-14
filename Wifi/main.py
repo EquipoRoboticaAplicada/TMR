@@ -4,7 +4,7 @@ from odo import RoverOdometry
 from map import RoverMap
 from command import send_motor_command
 
-PI_IP = "192.168.1.80"
+PI_IP = "172.32.236.53"
 
 if __name__ == "__main__":
     # 1. ComunicaciónXN

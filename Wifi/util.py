@@ -117,10 +117,10 @@ class ImgProcessor:
                         command_send_counter = 0
                     elif turn > 0:
                         left_rpm = right_rpm = rot
-                        dir_left, dir_right  = 0, 1
+                        dir_left, dir_right  = 1, 0
                     else:
                         left_rpm = right_rpm = rot
-                        dir_left, dir_right  = 1, 0
+                        dir_left, dir_right  = 0, 1
                 else:
                     left_rpm = right_rpm = APPROACH_RPM
                     dir_left = dir_right = 1
