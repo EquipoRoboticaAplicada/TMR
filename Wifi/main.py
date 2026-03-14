@@ -23,6 +23,14 @@ if __name__ == "__main__":
         daemon=True
     ).start()
 
+# 4. Ruta predefinida para el rover (En hilo secundario para no bloquear Pygame)
+    route = Route_Command(sender) # Pasamos la conexión 'sender' existente
+    
+    threading.Thread(
+        target=route.follow_path,
+        args=(odo,),
+        daemon=True
+    ).start()
 
 
     # 4. Mapa pygame — bloqueante en main thread
@@ -34,6 +42,4 @@ if __name__ == "__main__":
         sender.stop()
         odo.stop()
 
-    # 5. Ruta predefinida para el rover
-
-    route=Route_Command()
+    
