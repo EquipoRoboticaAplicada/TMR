@@ -19,11 +19,11 @@ import time
 class Route_Command:
     def __init__(self, sender_instance, vision_override_event):
         self.path =  [
-            (10, 0),    
-            (10, 10),   
-            (0, 10),    
+            (3, 0),    
+            (3, 3),   
+            (0, 3),    
             (0, 0),     
-            (5, 5)      
+            (3, 3)      
         ]
         self.send_motor_rpm = sender_instance
         self.vision_override = vision_override_event
@@ -49,6 +49,8 @@ class Route_Command:
                 continue
             
             # --- RECÁLCULO DEL PUNTO MÁS CERCANO ---
+
+
             if was_tracking:
                 was_tracking = False
                 current_x, current_y, _ = rover_odometry.pose
@@ -58,12 +60,12 @@ class Route_Command:
                 best_index = current_index
                 
                 # Buscar solo entre los puntos restantes
-                for i in range(current_index, len(self.path)):
-                    wx, wy = self.path[i]
-                    dist = math.hypot(wx - current_x, wy - current_y)
-                    if dist < min_dist:
-                        min_dist = dist
-                        best_index = i
+                # for i in range(current_index, len(self.path)):
+                #     wx, wy = self.path[i]
+                #     dist = math.hypot(wx - current_x, wy - current_y)
+                #     if dist < min_dist:
+                #         min_dist = dist
+                #         best_index = i
                         
                 current_index = best_index
                 target_x, target_y = self.path[current_index]
