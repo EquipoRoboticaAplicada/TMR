@@ -29,7 +29,7 @@ class ESP:
 
         if not ports:
             print("⚠️  No se encontraron puertos seriales.\n")
-            return
+            return 
         else:
             print(f"🔍 Buscando ESPs en: {ports}")
             for port in ports:
