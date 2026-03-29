@@ -3,8 +3,8 @@ const char* ESP_ID = "ESP_R";
 
 // Para IBT-2: IN1 = RPWM, IN2 = LPWM
 // Orden: 0=adelante, 1=en medio, 2=atrás
-const int IN1[3] = {27, 26, 25};  // RPWM
-const int IN2[3] = {14, 13, 23};  // LPWM
+const int IN1[3] = {13, 26, 25};  // RPWM
+const int IN2[3] = {14, 27, 23};  // LPWM
 
 // FIX #1: Los pines de encoder YA NO comparten pines con IN1/IN2.
 // Antes: ENC_A = {32, 25, 26} → pines 25 y 26 colisionaban con IN1[2] e IN1[1].
