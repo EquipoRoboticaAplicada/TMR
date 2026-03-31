@@ -1,23 +1,8 @@
-# command.py
-
-# Descripción del programa
-#---------------------------------------------------------------------------------------------------------------------------------------------
-
-# Este programa define una ruta que el rover deberá seguir (dicha ruta se defin en "set_path()")
-
-# Se hace una normalización de unidades, como por ejemplo usar radianes en lugar ángulos (revisar si les gusta esta parte)
-
-# Se manda el request a server.py para obtener los valores de posición actual del rover calculados por odometría 
-
-# Se mandan comandos para que el rover se mueva de acuerdo a la ruta establacida, calculando errores del punto deseado hasta su punto actual  
-
-#---------------------------------------------------------------------------------------------------------------------------------------------
-
 import math
 import time
 
 class Route_Command:
-    def __init__(self, sender_instance, vision_override_event):
+    def __init__(self, ESP_send, vision_override_event):
         self.path =  [
             (3, 0),    
             (3, 3),   
@@ -25,7 +10,7 @@ class Route_Command:
             (0, 0),     
             (3, 3)      
         ]
-        self.send_motor_rpm = sender_instance
+        self.send_motor_rpm = ESP_send
         self.vision_override = vision_override_event
 
     def set_path(self):
@@ -88,16 +73,16 @@ class Route_Command:
                 
             if abs(angle_error) > ANGLE_TOLERANCE:
                 if angle_error > 0:
-                    self.send_motor_rpm.send_rpms(BASE_RPM, BASE_RPM, 0, 1)  # Derecha      
+                    self.send_motor_rpm.send_uart(BASE_RPM, BASE_RPM, 0, 1)  # Derecha      
                 else:
-                    self.send_motor_rpm.send_rpms(BASE_RPM, BASE_RPM, 1, 0)  # Izquierda
+                    self.send_motor_rpm.send_uart(BASE_RPM, BASE_RPM, 1, 0)  # Izquierda
             else:
-                self.send_motor_rpm.send_rpms(BASE_RPM, BASE_RPM, 1, 1)  # En frente
+                self.send_motor_rpm.send_uart(BASE_RPM, BASE_RPM, 1, 1)  # En frente
                 
             time.sleep(0.1) 
 
-        print("Ruta completada :D")  
-        self.send_motor_rpm.send_rpms(0, 0, 1, 1)     
+        print("Ruta completada. Deteniendo rover.")  
+        self.send_motor_rpm.send_uart(0, 0, 1, 1)     
 
 def normalize_angle(angle):
     while angle > math.pi: angle -= 2.0 * math.pi
