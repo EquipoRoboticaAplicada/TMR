@@ -1,15 +1,16 @@
-# Envío y recepción de datos PC - Raspberry Pi 5
-
+# server.py
 import threading
 from flask import Flask, Response, request, jsonify
-from video_stream import gen_frames
+from video_stream import gen_frames, init_video_stream
 from connect import ESP
+from zed import ZEDShared
 
 # ----- Estado de Visión -----
 vision_state = {"colors": [], "centroids": [], "areas": [], "time": 0.0}
 
-# ----- La instancia ESP se inyecta desde main.py mediante init_app() -----
+# ----- Instancias globales inyectadas desde main.py -----
 esp: ESP = None
+zed: ZEDShared = None
 
 command_state = {
     "left_dir":  "D1",
@@ -19,13 +20,11 @@ command_state = {
 }
 command_lock = threading.Lock()
 
-def init_app(esp_instance: ESP):
-    """
-    Recibe la instancia ESP ya conectada desde main.py.
-    Debe llamarse antes de arrancar Flask.
-    """
-    global esp
+def init_app(esp_instance: ESP, zed_instance: ZEDShared):
+    global esp, zed
     esp = esp_instance
+    zed = zed_instance
+    init_video_stream(zed)
 
 # ================= FUNCIONES DE CONTROL =================
 def valid_S(x):
@@ -44,13 +43,10 @@ def video_feed():
 
 @app.route("/telemetry", methods=["GET"])
 def telemetry():
-    """Devuelve el estado actual de los motores (odometría) a la PC."""
-    # print({"rover_state":esp.get_rover_state()}) # Debug
-    return jsonify({"rover_state":esp.get_rover_state()})
+    return jsonify({"rover_state": esp.get_rover_state()})
 
 @app.route("/rcv_speed_dir", methods=["POST"])
 def rcv_speed_dir():
-    """Recibe comandos desde la PC y los guarda en command_state."""
     data = request.get_json(force=True) or {}
 
     left_rpm  = data.get("left_rpm",  "S0")
@@ -58,10 +54,14 @@ def rcv_speed_dir():
     left_dir  = data.get("left_dir",  "D1")
     right_dir = data.get("right_dir", "D1")
 
-    if not valid_S(left_rpm):  left_rpm  = "S0"
-    if not valid_S(right_rpm): right_rpm = "S0"
-    if not valid_D(left_dir):  left_dir  = "D1"
-    if not valid_D(right_dir): right_dir = "D1"
+    if not valid_S(left_rpm):
+        left_rpm = "S0"
+    if not valid_S(right_rpm):
+        right_rpm = "S0"
+    if not valid_D(left_dir):
+        left_dir = "D1"
+    if not valid_D(right_dir):
+        right_dir = "D1"
 
     with command_lock:
         command_state.update({
@@ -70,4 +70,43 @@ def rcv_speed_dir():
             "right_dir": right_dir,
             "right_rpm": right_rpm,
         })
+
     return jsonify({"status": "ok"})
+
+@app.route("/depth_at", methods=["POST"])
+def depth_at():
+    """
+    Recibe x,y del píxel detectado en la laptop y devuelve profundidad en metros.
+    """
+    data = request.get_json(force=True) or {}
+
+    x = data.get("x", None)
+    y = data.get("y", None)
+
+    if x is None or y is None:
+        return jsonify({"ok": False, "error": "faltan x,y"}), 400
+
+    try:
+        x = int(x)
+        y = int(y)
+    except Exception:
+        return jsonify({"ok": False, "error": "x,y invalidos"}), 400
+
+    result = zed.get_frame_copy()
+    if result is None:
+        return jsonify({"ok": False, "error": "sin frame disponible"}), 503
+
+    frame, ts = result
+    h, w = frame.shape[:2]
+
+    distance_m = zed.get_depth_median_neighborhood(x, y, radius=2)
+
+    return jsonify({
+        "ok": True,
+        "x": x,
+        "y": y,
+        "distance_m": distance_m,
+        "timestamp": ts,
+        "frame_width": w,
+        "frame_height": h
+    })
