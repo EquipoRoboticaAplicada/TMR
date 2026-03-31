@@ -4,20 +4,20 @@ from odo import RoverOdometry
 from map import RoverMap
 from command import Route_Command
 
-PI_IP = "172.32.236.53"
+Jetson_IP = "192.168.0.190"
 
 if __name__ == "__main__":
     # 1. Comunicación
-    sender  = Sender(PI_IP).start()
+    sender  = Sender(Jetson_IP).start()
     
     # 2. Bandera de prioridad para visión
     vision_override = threading.Event()
 
     # 3. Pasar la bandera a ImgProcessor
-    grabber = ImgProcessor(PI_IP, vision_override=vision_override).start()
+    grabber = ImgProcessor(Jetson_IP, vision_override=vision_override).start()
 
     # 4. Odometría
-    odo  = RoverOdometry(PI_IP)
+    odo  = RoverOdometry(Jetson_IP)
     mapa = RoverMap(odometry=odo)
 
     # 5. Visión + control en hilo secundario

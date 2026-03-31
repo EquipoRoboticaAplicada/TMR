@@ -10,9 +10,13 @@ from vision import detect_colors, crosslines
 class ImgProcessor:
     def __init__(self, PI_IP, warmup_sec=0.0, vision_override=None):
         self.video_url = f"http://{PI_IP}:5000/video_feed"
+        self.depth_url = f"http://{PI_IP}:5000/depth_at"
+
         self.cap = cv.VideoCapture(self.video_url)
         if not self.cap.isOpened():
             raise RuntimeError(f"No se pudo abrir el stream: {self.video_url}")
+
+        self.session = requests.Session()
 
         self.lock = threading.Lock()
         self.frame = None
@@ -20,6 +24,9 @@ class ImgProcessor:
         self.stop_event = threading.Event()
         self.thread = threading.Thread(target=self._run, daemon=True)
         self.vision_override = vision_override
+
+        self.last_depth = None
+        self.last_depth_ts = 0.0
 
         if warmup_sec > 0:
             t0 = time.time()
@@ -48,10 +55,24 @@ class ImgProcessor:
                 return False, None
             return self.ok, self.frame.copy()
 
+    def query_depth(self, x, y, timeout=0.08):
+        try:
+            r = self.session.post(
+                self.depth_url,
+                json={"x": int(x), "y": int(y)},
+                timeout=timeout
+            )
+            r.raise_for_status()
+            data = r.json()
+            if not data.get("ok", False):
+                return None
+            return data
+        except requests.exceptions.RequestException:
+            return None
+
     def run_tracker(self, sender: "Sender"):
         """
         Loop principal de visión y control. Bloqueante hasta pulsar ESC.
-        Llama directamente a sender.send_rpms() sin dependencias externas.
         """
 
         # --- Parámetros de estabilidad ---
@@ -79,6 +100,17 @@ class ImgProcessor:
             target   = pick_target(centroids, areas, area_min=AREA_MIN)
             detected = target is not None
 
+            depth_info = None
+            if detected:
+                centroid, area = target
+                cx = centroid[1]
+                cy = centroid[2]
+
+                depth_info = self.query_depth(cx, cy)
+                if depth_info is not None:
+                    self.last_depth = depth_info.get("distance_m", None)
+                    self.last_depth_ts = depth_info.get("timestamp", 0.0)
+
             if detected:
                 centroid, area = target
                 seen_count += 1
@@ -92,7 +124,7 @@ class ImgProcessor:
                 tracking = True
                 if self.vision_override:
                     self.vision_override.set()
-                    
+
             if tracking and (lost_count >= N_EXIT):
                 tracking    = False
                 mode_rotate = False
@@ -128,7 +160,6 @@ class ImgProcessor:
                         left_rpm = right_rpm = APPROACH_RPM
                         dir_left = dir_right = 1
 
-                # Envío de comandos
                 command_send_counter += 1
                 if command_send_counter >= COMMAND_SEND_EVERY:
                     sender.send_rpms(
@@ -139,6 +170,23 @@ class ImgProcessor:
                     command_send_counter = 0
 
             video = crosslines(frame.copy())
+
+            if detected:
+                centroid, area = target
+                cx = centroid[1]
+                cy = centroid[2]
+
+                cv.putText(video, f"Area: {int(area)}", (cx + 10, cy + 20),
+                           cv.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
+
+                if self.last_depth is not None:
+                    depth_text = f"Dist: {self.last_depth:.2f} m"
+                else:
+                    depth_text = "Dist: invalida"
+
+                cv.putText(video, depth_text, (cx + 10, cy + 45),
+                           cv.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
+
             cv.imshow("VISION ROVER (PC DEBUG)", video)
 
             if cv.waitKey(1) & 0xFF == 27:  # ESC
@@ -150,6 +198,7 @@ class ImgProcessor:
         self.stop_event.set()
         self.thread.join(timeout=1.0)
         self.cap.release()
+        self.session.close()
 
 
 # ---------------------------
