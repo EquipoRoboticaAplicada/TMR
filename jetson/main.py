@@ -1,8 +1,8 @@
 # main.py
 from connect import ESP
 import server
-from zed import ZEDShared
-from vision_zed import VisionZED
+
+from vision_zed import VisionZED, ZEDShared
 from util import SenderJetson, ImgProcessorJetson
 from command import Route_Command
 from odo import RoverOdometry
