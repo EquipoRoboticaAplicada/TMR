@@ -1,36 +1,50 @@
-import threading
-import time
+# main.py
 from connect import ESP
 import server
-from zed import ZEDShared
+from zed_shared import ZEDShared
+from vision_zed import VisionZED
+from util_jetson import SenderJetson, ImgProcessorJetson
 
-def control_loop(esp: ESP):
-    """Consume command_state y envía comandos UART a los ESP32."""
-    while True:
-        with server.command_lock:
-            cmd = dict(server.command_state)
 
-        esp.send_uart(
-            cmd["left_dir"], cmd["left_rpm"],
-            cmd["right_dir"], cmd["right_rpm"]
-        )
-        time.sleep(0.02)  # 50 Hz
+def get_remote_command():
+    with server.command_lock:
+        return dict(server.command_state)
+
 
 if __name__ == "__main__":
     esp = ESP()
     esp.connect()
 
-    zed=ZEDShared(resolution="HD720",fps=30,depth_mode="NEURAL",min_depth=0.2,max_depth=20,confidence_threshold=50).start()
+    zed = ZEDShared(
+        resolution="HD720",
+        fps=30,
+        depth_mode="PERFORMANCE",
+        min_depth=0.2,
+        max_depth=20.0,
+        confidence_threshold=50
+    ).start()
 
+    vision = VisionZED(
+        zed_shared=zed,
+        color_file="colors.json",
+        area_min=500,
+        draw_local=False
+    ).start()
 
-    server.init_app(esp,zed)
+    tracker = ImgProcessorJetson(vision)
 
-    # Este sí puede ser daemon
-    threading.Thread(target=control_loop, args=(esp,), daemon=True).start()
+    sender_local = SenderJetson(
+        esp=esp,
+        get_remote_command_fn=get_remote_command,
+        is_tracking_fn=tracker.is_tracking
+    ).start()
+
+    tracker.start(sender_local)
+
+    server.init_app(esp, zed, vision, tracker)
 
     try:
         print("Iniciando servidor Flask en http://0.0.0.0:5000")
-        # Flask se queda en el hilo principal
         server.app.run(
             host="0.0.0.0",
             port=5000,
@@ -38,5 +52,8 @@ if __name__ == "__main__":
             use_reloader=False
         )
     finally:
+        tracker.stop()
+        sender_local.stop()
+        vision.stop()
         zed.stop()
         esp.close()
