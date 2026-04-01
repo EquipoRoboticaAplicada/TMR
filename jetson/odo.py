@@ -22,10 +22,10 @@ class RoverOdometry:
         "last_update": 0.0
     }
 
-    def __init__(self, track_width_m: float = 0.80):
+    def __init__(self, esp, track_width_m: float = 0.80):
         # BUG 1+2 CORREGIDO: se usa Receiver (que sí existe en util.py)
         # en lugar de la función standalone read_odometry que fue eliminada.
-        self.esp    = ESP()
+        self.esp    = esp
         self.L      = track_width_m
 
         # --- Pose del rover (odometría integrada) ---

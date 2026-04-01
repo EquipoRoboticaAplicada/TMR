@@ -4,19 +4,18 @@ import server
 from zed import ZEDShared
 from vision_zed import VisionZED
 from util import SenderJetson, ImgProcessorJetson
-
+from command import Route_Command
+from odo import RoverOdometry
+import threading
 
 def get_remote_command():
     with server.command_lock:
         return dict(server.command_state)
 
-def command_loop():
-    
-
-
 if __name__ == "__main__":
     esp = ESP()
     esp.connect()
+    odo = RoverOdometry(esp=esp)
 
     zed = ZEDShared(
         resolution="HD720",
@@ -45,6 +44,14 @@ if __name__ == "__main__":
     tracker.start(sender_local)
 
     server.init_app(esp, zed, vision, tracker)
+
+    rvr_cmd = Route_Command(ESP_send=esp, vision_override_event=tracker.vision_override)
+
+    threading.Thread(
+        target=rvr_cmd.follow_path,
+        args=(odo,),
+        daemon=True
+    ).start()
 
     try:
         print("Iniciando servidor Flask en http://0.0.0.0:5000")
