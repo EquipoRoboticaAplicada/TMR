@@ -16,22 +16,10 @@ if __name__ == "__main__":
     odo = RoverOdometry(esp=esp)
 
     # 3. Cámara ZED
-    zed = ZEDShared(
-        resolution="HD720",
-        fps=30,
-        depth_mode="PERFORMANCE",
-        min_depth=0.2,
-        max_depth=20.0,
-        confidence_threshold=50
-    ).start()
+    zed = ZEDShared().start()
 
     # 4. Pipeline de visión
-    vision = VisionZED(
-        zed_shared=zed,
-        color_file="colors.json",
-        area_min=500,
-        draw_local=False
-    ).start()
+    vision = VisionZED(zed_shared=zed).start()
 
     # 5. Sender: único punto de escritura al ESP
     sender_local = SenderJetson(esp=esp).start()
