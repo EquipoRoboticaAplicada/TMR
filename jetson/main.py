@@ -1,9 +1,9 @@
 # main.py
 from connect import ESP
 import server
-from zed_shared import ZEDShared
+from zed import ZEDShared
 from vision_zed import VisionZED
-from util_jetson import SenderJetson, ImgProcessorJetson
+from util import SenderJetson, ImgProcessorJetson
 
 
 def get_remote_command():
