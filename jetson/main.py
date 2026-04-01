@@ -10,6 +10,9 @@ def get_remote_command():
     with server.command_lock:
         return dict(server.command_state)
 
+def command_loop():
+    
+
 
 if __name__ == "__main__":
     esp = ESP()
