@@ -1,5 +1,3 @@
-# server.py
-import threading
 from flask import Flask, Response, request, jsonify
 from video_stream import gen_frames, init_video_stream
 from connect import ESP
