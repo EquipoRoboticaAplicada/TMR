@@ -1,22 +1,21 @@
-# main.py
 from connect import ESP
 import server
-
 from vision_zed import VisionZED, ZEDShared
 from util import SenderJetson, ImgProcessorJetson
 from command import Route_Command
 from odo import RoverOdometry
 import threading
 
-def get_remote_command():
-    with server.command_lock:
-        return dict(server.command_state)
 
 if __name__ == "__main__":
+    # 1. Conexión serial con los ESP32
     esp = ESP()
     esp.connect()
+
+    # 2. Odometría (inicia su propio hilo interno)
     odo = RoverOdometry(esp=esp)
 
+    # 3. Cámara ZED
     zed = ZEDShared(
         resolution="HD720",
         fps=30,
@@ -26,6 +25,7 @@ if __name__ == "__main__":
         confidence_threshold=50
     ).start()
 
+    # 4. Pipeline de visión
     vision = VisionZED(
         zed_shared=zed,
         color_file="colors.json",
@@ -33,20 +33,21 @@ if __name__ == "__main__":
         draw_local=False
     ).start()
 
+    # 5. Sender: único punto de escritura al ESP
+    sender_local = SenderJetson(esp=esp).start()
+
+    # 6. Tracker: detecta objetos y toma control cuando corresponde
     tracker = ImgProcessorJetson(vision)
-
-    sender_local = SenderJetson(
-        esp=esp,
-        get_remote_command_fn=get_remote_command,
-        is_tracking_fn=tracker.is_tracking
-    ).start()
-
     tracker.start(sender_local)
 
+    # 7. Servidor Flask (telemetría + stream de video)
     server.init_app(esp, zed, vision, tracker)
 
-    rvr_cmd = Route_Command(ESP_send=esp, vision_override_event=tracker.vision_override)
-
+    # 8. Ruta autónoma
+    rvr_cmd = Route_Command(
+        sender=sender_local,
+        vision_override_event=tracker.vision_override
+    )
     threading.Thread(
         target=rvr_cmd.follow_path,
         args=(odo,),
@@ -66,4 +67,5 @@ if __name__ == "__main__":
         sender_local.stop()
         vision.stop()
         zed.stop()
+        odo.stop()
         esp.close()

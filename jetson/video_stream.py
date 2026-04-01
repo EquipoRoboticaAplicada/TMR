@@ -4,7 +4,7 @@ import time
 
 zed_shared = None
 
-TARGET_FPS = 8
+TARGET_FPS = 10
 FRAME_PERIOD = 1.0 / TARGET_FPS
 
 ENCODE_PARAMS = [

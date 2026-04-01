@@ -1,4 +1,4 @@
-from flask import Flask, Response, request, jsonify
+from flask import Flask, Response, jsonify
 from video_stream import gen_frames, init_video_stream
 from connect import ESP
 
