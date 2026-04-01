@@ -1,7 +1,7 @@
 import threading
 import time
 from connect import ESP
-import server
+import command
 from zed import ZEDShared
 
 def control_loop(esp: ESP):
@@ -22,8 +22,7 @@ if __name__ == "__main__":
 
     zed=ZEDShared(resolution="HD720",fps=30,depth_mode="NEURAL",min_depth=0.2,max_depth=20,confidence_threshold=50).start()
 
-
-    server.init_app(esp,zed)
+    rvr_cmd = command.Route_Command(esp, vision_override_event=threading.Event())
 
     # Este sí puede ser daemon
     threading.Thread(target=control_loop, args=(esp,), daemon=True).start()
