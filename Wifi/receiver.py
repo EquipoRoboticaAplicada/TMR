@@ -1,7 +1,6 @@
 import requests
 import time
 import threading
-import cv2 as cv
 
 # ---------------------------
 # Hilo para recibos HTTP
@@ -9,6 +8,7 @@ import cv2 as cv
 class Receiver:
     def __init__(self, PI_IP, poll_hz: float = 20.0):
         self.telemetry      = f"http://{PI_IP}:5000/telemetry"
+        self.odometry       = f"http://{PI_IP}:5000/odometry"
         self.lock           = threading.Lock()
         self.stop_event     = threading.Event()
         self.thread         = threading.Thread(target=self._run, daemon=True)

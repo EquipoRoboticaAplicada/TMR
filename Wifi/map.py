@@ -153,7 +153,7 @@ class RoverMap:
                             print("🔄 Pose reseteada.")
 
                 # --- Obtener estado del rover ---
-                x, y, theta = self.odometry.pose
+                x, y, theta  = self.odometry.pose
                 v, omega     = self.odometry.velocity
 
                 # Guardar punto en la trayectoria (evitar duplicados estáticos)

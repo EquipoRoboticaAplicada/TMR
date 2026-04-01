@@ -5,18 +5,6 @@ from util import SenderJetson, ImgProcessorJetson
 from command import Route_Command
 from odo import RoverOdometry
 import threading
-import socket
-
-
-def get_local_ip():
-    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    try:
-        s.connect(("8.8.8.8", 80))
-        ip = s.getsockname()[0]
-    finally:
-        s.close()
-    return ip
-
 
 if __name__ == "__main__":
     # 1. Conexión serial con los ESP32
@@ -47,22 +35,15 @@ if __name__ == "__main__":
         sender=sender_local,
         vision_override_event=tracker.vision_override
     )
+
     threading.Thread(
         target=rvr_cmd.follow_path,
         args=(odo,),
         daemon=True
     ).start()
 
-    jetson_IP = get_local_ip()
-
     try:
-        print(f"Iniciando servidor Flask en http://{jetson_IP}:5000")
-        server.app.run(
-            host=jetson_IP,
-            port=5000,
-            threaded=True,
-            use_reloader=False
-        )
+        server.__run__()
     finally:
         tracker.stop()
         sender_local.stop()

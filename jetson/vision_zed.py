@@ -157,8 +157,12 @@ KERNEL = cv.getStructuringElement(cv.MORPH_ELLIPSE, (5, 5))
 
 
 def load_color_ranges():
-    with open(color_file, "r", encoding="utf-8") as f:
-        return json.load(f)
+    try: 
+        with open(color_file, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except FileNotFoundError as e:
+        print(f"Error al cargar {color_file}: {e}")
+        return {}
 
 def process_mask(mask):
     mask = cv.morphologyEx(mask, cv.MORPH_OPEN, KERNEL, iterations=1)

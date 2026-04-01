@@ -1,5 +1,3 @@
-# Programa de conexión Raspberry Pi 5 - ESP32
-
 import threading
 import platform
 import serial
