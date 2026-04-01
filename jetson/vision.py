@@ -1,21 +1,7 @@
-import os
+# vision_common.py
 import json
 import cv2 as cv
 import numpy as np
-
-# --- Rangos HSV ---
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-CONFIG_DIR = os.path.join(BASE_DIR, "config")
-COLOR_FILE = os.path.join(CONFIG_DIR, "colors.json")
-
-if not os.path.exists(COLOR_FILE):
-    raise FileNotFoundError(
-        f"No se encontró el archivo de calibración en:\n{COLOR_FILE}\n"
-        "Ejecuta primero calibrate_colors.py"
-    )
-
-with open(COLOR_FILE, "r") as f:
-    COLOR_RANGES = json.load(f)
 
 DRAW = {
     "green": (0, 255, 0),
@@ -26,10 +12,17 @@ DRAW = {
 MIN_AREA = 600
 KERNEL = cv.getStructuringElement(cv.MORPH_ELLIPSE, (5, 5))
 
+
+def load_color_ranges(color_file="colors.json"):
+    with open(color_file, "r") as f:
+        return json.load(f)
+
+
 def process_mask(mask):
     mask = cv.morphologyEx(mask, cv.MORPH_OPEN, KERNEL, iterations=1)
     mask = cv.morphologyEx(mask, cv.MORPH_CLOSE, KERNEL, iterations=1)
     return mask
+
 
 def find_and_draw(mask, frame_draw, label, draw=True):
     found = False
@@ -60,7 +53,8 @@ def find_and_draw(mask, frame_draw, label, draw=True):
 
     return found, detected_centroids, areas
 
-def detect_colors(frame, draw=True):
+
+def detect_colors(frame, color_ranges, draw=False):
     colors = []
     centroids = []
     areas = []
@@ -68,11 +62,7 @@ def detect_colors(frame, draw=True):
     blurred = cv.GaussianBlur(frame, (5, 5), 0)
     hsv = cv.cvtColor(blurred, cv.COLOR_BGR2HSV)
 
-    for color, ranges in COLOR_RANGES.items():
-
-        # ranges puede ser:
-        # - dict: {"lower":[...], "upper":[...]}
-        # - list (en el caso del rojo): [{"lower":[...], "upper":[...]}, {"lower":[...], "upper":[...]}]
+    for color, ranges in color_ranges.items():
         if isinstance(ranges, dict):
             lower = np.array(ranges["lower"], dtype=np.uint8)
             upper = np.array(ranges["upper"], dtype=np.uint8)
@@ -87,10 +77,8 @@ def detect_colors(frame, draw=True):
                 mask = m if mask is None else cv.bitwise_or(mask, m)
 
             if mask is None:
-                continue  # lista vacía (no debería pasar)
-
+                continue
         else:
-            # Formato inesperado en JSON
             continue
 
         mask = process_mask(mask)
@@ -104,11 +92,12 @@ def detect_colors(frame, draw=True):
 
     return colors, centroids, areas
 
-def crosslines(screen):
-    h, w = screen.shape[:2]
-    cx, cy = w // 2, h // 2
-    cv.line(screen, (cx-50, 0), (cx-50, h), (255,255,255), 1)
-    cv.line(screen, (cx+50, 0), (cx+50, h), (255,255,255), 1)
-    cv.line(screen, (0, cy-40), (w, cy-40), (255,255,255), 1)
-    cv.line(screen, (0, cy+70), (w, cy+70), (255,255,255), 1)
-    return screen
+
+def pick_target(centroids, areas, area_min=1500):
+    if not centroids or not areas:
+        return None
+    candidates = [(c, a) for c, a in zip(centroids, areas) if a >= area_min]
+    if not candidates:
+        return None
+    centroid, area = max(candidates, key=lambda x: x[1])
+    return centroid, area
