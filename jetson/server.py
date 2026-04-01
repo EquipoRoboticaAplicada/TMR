@@ -5,33 +5,15 @@ from video_stream import gen_frames, init_video_stream
 from connect import ESP
 from zed import ZEDShared
 
-# ----- Estado de Visión -----
-vision_state = {"colors": [], "centroids": [], "areas": [], "time": 0.0}
-
 # ----- Instancias globales inyectadas desde main.py -----
 esp: ESP = None
 zed: ZEDShared = None
-
-command_state = {
-    "left_dir":  "D1",
-    "left_rpm":  "S0",
-    "right_dir": "D1",
-    "right_rpm": "S0",
-}
-command_lock = threading.Lock()
 
 def init_app(esp_instance: ESP, zed_instance: ZEDShared):
     global esp, zed
     esp = esp_instance
     zed = zed_instance
     init_video_stream(zed)
-
-# ================= FUNCIONES DE CONTROL =================
-def valid_S(x):
-    return isinstance(x, str) and x.startswith("S") and len(x) >= 2
-
-def valid_D(x):
-    return isinstance(x, str) and x in ("D0", "D1")
 
 # ================= FLASK =================
 app = Flask(__name__)
