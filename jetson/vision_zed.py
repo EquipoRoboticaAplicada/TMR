@@ -1,12 +1,14 @@
 # vision_zed.py
 
 import json
+from pathlib import Path
 import threading
 import time
 import cv2 as cv
 import numpy as np
 import pyzed.sl as sl
 
+color_file = Path(__file__).resolve().parent / "config" / "colors.json"
 
 #============================ZED CAMERA====================================
 
@@ -142,9 +144,8 @@ class ZEDShared:
         self.zed.close()
 
 
-
-
 #============================VISION====================================
+
 DRAW = {
     "green": (0, 255, 0),
     "blue":  (255, 0, 0),
@@ -155,10 +156,9 @@ MIN_AREA = 600
 KERNEL = cv.getStructuringElement(cv.MORPH_ELLIPSE, (5, 5))
 
 
-def load_color_ranges(color_file="colors.json"):
-    with open(color_file, "r") as f:
+def load_color_ranges():
+    with open(color_file, "r", encoding="utf-8") as f:
         return json.load(f)
-
 
 def process_mask(mask):
     mask = cv.morphologyEx(mask, cv.MORPH_OPEN, KERNEL, iterations=1)
@@ -245,13 +245,12 @@ def pick_target(centroids, areas, area_min=1500):
     return centroid, area
 
 
-
-
+#============================MIX ZED & VISION====================================
 
 class VisionZED:
-    def __init__(self, zed_shared, color_file="colors.json", area_min=500, draw_local=False):
+    def __init__(self, zed_shared, area_min=500, draw_local=False):
         self.zed = zed_shared
-        self.color_ranges = load_color_ranges(color_file)
+        self.color_ranges = load_color_ranges()
         self.area_min = area_min
         self.draw_local = draw_local
 
