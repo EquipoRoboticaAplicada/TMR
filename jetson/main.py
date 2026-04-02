@@ -1,10 +1,14 @@
+# main.py
 from connect import ESP
 import server
+
 from vision_zed import VisionZED, ZEDShared
 from util import SenderJetson, ImgProcessorJetson
 from command import Route_Command
 from odo import RoverOdometry
+from local_debug import run_debug
 import threading
+
 
 if __name__ == "__main__":
     # 1. Conexión serial con los ESP32
@@ -35,10 +39,16 @@ if __name__ == "__main__":
         sender=sender_local,
         vision_override_event=tracker.vision_override
     )
-
     threading.Thread(
         target=rvr_cmd.follow_path,
         args=(odo,),
+        daemon=True
+    ).start()
+
+    # 9. Debug local (ventana OpenCV en la Jetson)
+    threading.Thread(
+        target=run_debug,
+        args=(zed, vision, odo),
         daemon=True
     ).start()
 
