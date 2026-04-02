@@ -28,7 +28,7 @@ if __name__ == "__main__":
     tracker.start(sender_local)
 
     # 7. Servidor Flask (telemetría + stream de video)
-    server.init_app(esp, zed, vision, tracker)
+    server.init_app(esp, zed, vision, tracker, odo)
 
     # 8. Ruta autónoma
     rvr_cmd = Route_Command(
