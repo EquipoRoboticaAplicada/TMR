@@ -1,10 +1,14 @@
+# main.py
 from connect import ESP
 import server
+
 from vision_zed import VisionZED, ZEDShared
 from util import SenderJetson, ImgProcessorJetson
 from command import Route_Command
 from odo import RoverOdometry
+from debug_local import run_debug
 import threading
+
 
 if __name__ == "__main__":
     # 1. Conexión serial con los ESP32
@@ -27,23 +31,24 @@ if __name__ == "__main__":
     tracker = ImgProcessorJetson(vision)
     tracker.start(sender_local)
 
-    # 7. Servidor Flask (telemetría + stream de video)
+    # 7. Servidor Flask en hilo secundario (OpenCV necesita el hilo principal)
     server.init_app(esp, zed, vision, tracker, odo)
+    threading.Thread(target=server.run, daemon=True).start()
 
     # 8. Ruta autónoma
     rvr_cmd = Route_Command(
         sender=sender_local,
         vision_override_event=tracker.vision_override
     )
-
     threading.Thread(
         target=rvr_cmd.follow_path,
         args=(odo,),
         daemon=True
     ).start()
 
+    # 9. Debug local — corre en el hilo principal para que OpenCV funcione
     try:
-        server.run()
+        run_debug(zed, vision, odo)
     finally:
         tracker.stop()
         sender_local.stop()
