@@ -1,14 +1,14 @@
-import threading
-from odo import RoverOdometry
 from map import RoverMap
+from receiver import Receiver
 
 Jetson_IP = "192.168.1.82"
 
 if __name__ == "__main__":    
-    odo  = RoverOdometry(Jetson_IP)
-    mapa = RoverMap(odometry=odo)
+    receiver  = Receiver(Jetson_IP)
+    rec = receiver.start()
+    mapa = RoverMap(receiver=rec)
 
     try:
         mapa.run()
     finally:
-        odo.stop()
+        receiver.stop()

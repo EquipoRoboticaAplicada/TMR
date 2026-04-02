@@ -1,6 +1,6 @@
 import pygame
 import math
-from odo import RoverOdometry
+from receiver import Receiver
 
 # ---------------------------
 # Clase de visualización 
@@ -24,11 +24,11 @@ class RoverMap:
     ORIGIN_COLOR  = (100, 100, 255)
     TEXT_COLOR    = (200, 200, 200)
 
-    def __init__(self, odometry: RoverOdometry,
+    def __init__(self, receiver: Receiver,
                  width: int = 1200, height: int = 1000,
                  scale: float = 50.0, fps: int = 60):
-
-        self.odometry = odometry
+ 
+        self.receiver = receiver
         self.width    = width
         self.height   = height
         self.scale    = scale          # px / metro
@@ -138,9 +138,6 @@ class RoverMap:
             while self._running:
                 self._clock.tick(self.fps)
 
-                # --- Actualizar odometría en el mismo hilo que el render ---
-                self.odometry._update_pose()
-
                 # --- Eventos ---
                 for event in pygame.event.get():
                     if event.type == pygame.QUIT:
@@ -148,13 +145,13 @@ class RoverMap:
 
                     elif event.type == pygame.KEYDOWN:
                         if event.key == pygame.K_r:
-                            self.odometry.reset_pose()
+                            self.receiver.reset_pose()
                             self._path.clear()
                             print("🔄 Pose reseteada.")
 
                 # --- Obtener estado del rover ---
-                x, y, theta  = self.odometry.pose
-                v, omega     = self.odometry.velocity
+                x, y, theta  = self.receiver.pose
+                v, omega     = self.receiver.velocity
 
                 # Guardar punto en la trayectoria (evitar duplicados estáticos)
                 if not self._path or (x, y) != self._path[-1]:
@@ -171,7 +168,7 @@ class RoverMap:
 
             self._quit()
         except Exception as e:
-            print(f"!! Error en visualización: {e}")
+            print(f"Error en visualización: {e}")
 
     def _quit(self):
         pygame.quit()

@@ -2,56 +2,91 @@ import requests
 import time
 import threading
 
-# ---------------------------
-# Hilo para recibos HTTP
-# ---------------------------
-class Receiver:
-    def __init__(self, PI_IP, poll_hz: float = 20.0):
-        self.telemetry      = f"http://{PI_IP}:5000/telemetry"
-        self.odometry       = f"http://{PI_IP}:5000/odometry"
-        self.lock           = threading.Lock()
-        self.stop_event     = threading.Event()
-        self.thread         = threading.Thread(target=self._run, daemon=True)
-        self._poll_interval = 1.0 / poll_hz
 
-        self._rover_state = {
-            "left_side":  {"seq": 0, "motors": [{"rpm": 0.0, "m/s": 0.0} for _ in range(3)]},
-            "right_side": {"seq": 0, "motors": [{"rpm": 0.0, "m/s": 0.0} for _ in range(3)]},
-            "last_update": 0.0
-        }
+class Receiver:
+    """
+    Corre en la PC. Hace polling al endpoint /pose del servidor Flask
+    en la Jetson y expone los datos con la misma interfaz que RoverOdometry,
+    para que map.py pueda usarlos sin cambios.
+
+    Interfaz pública:
+        .pose     → (x, y, theta)   igual que RoverOdometry.pose
+        .velocity → (v, omega)      igual que RoverOdometry.velocity
+    """
+
+    def __init__(self, PI_IP: str, poll_hz: float = 20.0):
+        self._url           = f"http://{PI_IP}:5000/odometry"
+        self._poll_interval = 1.0 / poll_hz
+        self._lock          = threading.Lock()
+        self._stop_event    = threading.Event()
+        self._thread        = threading.Thread(target=self._run, daemon=True)
+
+        # Estado interno — mismas claves que publica /pose
+        self._x     = 0.0
+        self._y     = 0.0
+        self._theta = 0.0
+        self._v     = 0.0
+        self._omega = 0.0
 
     def start(self):
-        self.thread.start()
+        self._thread.start()
         return self
 
-    @property
-    def rover_state(self) -> dict:
-        import copy
-        with self.lock:
-            return copy.deepcopy(self._rover_state)
-
-    def read_odometry(self, timeout: float = 2) -> dict | None:
-        try:
-            r = requests.get(self.telemetry, timeout=timeout)
-            r.raise_for_status()
-            data = r.json()
-            return data.get("rover_state")
-        except requests.exceptions.Timeout:
-            print("[read_odometry] Timeout al conectar con el servidor.")
-        except requests.exceptions.ConnectionError:
-            print("[read_odometry] No se pudo conectar con el servidor.")
-        except Exception as e:
-            print(f"[read_odometry] Error inesperado: {e}")
-        return None
+    # ------------------------------------------------------------------ #
+    #  Hilo de polling                                                     #
+    # ------------------------------------------------------------------ #
 
     def _run(self):
-        while not self.stop_event.is_set():
-            state = self.read_odometry()
-            if state is not None:
-                with self.lock:
-                    self._rover_state = state
-            time.sleep(self._poll_interval)
+        session = requests.Session()
+        while not self._stop_event.is_set():
+            t0 = time.time()
+            try:
+                r    = session.get(self._url, timeout=1.0)
+                r.raise_for_status()
+                data = r.json()
+                with self._lock:
+                    self._x     = data.get("x",     0.0)
+                    self._y     = data.get("y",     0.0)
+                    self._theta = data.get("theta", 0.0)
+                    self._v     = data.get("v",     0.0)
+                    self._omega = data.get("omega", 0.0)
+            except requests.exceptions.Timeout:
+                print("[Receiver] Timeout al conectar con el servidor.")
+            except requests.exceptions.ConnectionError:
+                print("[Receiver] No se pudo conectar con el servidor.")
+            except Exception as e:
+                print(f"[Receiver] Error inesperado: {e}")
+
+            # Regulación de frecuencia
+            elapsed = time.time() - t0
+            sleep   = self._poll_interval - elapsed
+            if sleep > 0:
+                time.sleep(sleep)
+
+        session.close()
+
+    def reset_pose(self):
+        try:
+            requests.post(f"{self._url}/reset", timeout=1.0)
+        except Exception as e:
+            print(f"[Receiver] Error al resetear pose: {e}")
+
+    # ------------------------------------------------------------------ #
+    #  API pública — misma interfaz que RoverOdometry                     #
+    # ------------------------------------------------------------------ #
+
+    @property
+    def pose(self) -> tuple:
+        """Retorna (x, y, theta) — metros y radianes."""
+        with self._lock:
+            return (self._x, self._y, self._theta)
+
+    @property
+    def velocity(self) -> tuple:
+        """Retorna (v [m/s], omega [rad/s])."""
+        with self._lock:
+            return (self._v, self._omega)
 
     def stop(self):
-        self.stop_event.set()
-        self.thread.join(timeout=1.0)
+        self._stop_event.set()
+        self._thread.join(timeout=1.0)

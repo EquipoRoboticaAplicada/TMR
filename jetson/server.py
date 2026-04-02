@@ -2,6 +2,7 @@ from flask import Flask, Response, jsonify
 from video_stream import gen_frames, init_video_stream
 from connect import ESP
 import socket
+import odo
 
 esp: ESP = None
 vision = None
@@ -17,11 +18,12 @@ def get_local_ip():
         s.close()
     return ip
 
-def init_app(esp_instance: ESP, zed_instance, vision_instance, tracker_instance):
+def init_app(esp_instance: ESP, zed_instance, vision_instance, tracker_instance, odo_instance):
     global esp, vision, tracker, odo
-    esp = esp_instance
-    vision = vision_instance
+    esp     = esp_instance
+    vision  = vision_instance
     tracker = tracker_instance
+    odo     = odo_instance
     init_video_stream(zed_instance)
 
 app = Flask(__name__)
@@ -34,6 +36,23 @@ def video_feed():
 @app.route("/telemetry", methods=["GET"])
 def telemetry():
     return jsonify({"rover_state": esp.get_rover_state()})
+
+@app.route("/pose/reset", methods=["POST"])
+def pose_reset():
+    odo.reset_pose()
+    return jsonify({"ok": True})
+
+@app.route("/odometry", methods=["GET"])
+def pose():
+    x, y, theta = odo.pose
+    v, omega    = odo.velocity
+    return jsonify({
+        "x":     x,
+        "y":     y,
+        "theta": theta,
+        "v":     v,
+        "omega": omega,
+    })
 
 def __run__():
     jetson_IP = get_local_ip()
