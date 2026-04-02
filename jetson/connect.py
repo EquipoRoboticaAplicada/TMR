@@ -2,6 +2,7 @@ import threading
 import platform
 import serial
 import time
+import copy
 
 class ESP: 
 
@@ -45,7 +46,7 @@ class ESP:
             import glob
             return glob.glob('/dev/ttyUSB*') + glob.glob('/dev/ttyACM*')
         except Exception as e: 
-            # print(f"connect.py error: (_get_available_ports()); {e}\n")
+            print(f"connect.py error: (_get_available_ports()); {e}\n")
             return None
 
     def _try_connect_port(self, port: str):
@@ -104,6 +105,11 @@ class ESP:
                     self._parse_esp_line(line)
             except serial.SerialException as e:
                 print(f"Error serial ({side}): {e}")
+                with self._lock:
+                    if side == "left":
+                        self._ser_left = None
+                    else:
+                        self._ser_right = None
                 break
 
     def _parse_esp_line(self, line: str):
@@ -158,22 +164,32 @@ class ESP:
         Devuelve una copia segura del rover_state actual.
         Usar siempre esta función desde server.py, nunca acceder a _rover_state directamente.
         """
-        import copy
         with self._lock:
             # print((self._rover_state)) # Debug
             return copy.deepcopy(self._rover_state)
 
-    def send_uart(self, left_dir: str, left_rpm: str, right_dir: str, right_rpm: str):
-        """
-        Envía comandos ya formateados tipo 'D1' y 'S20' (con newline).
-        """
-        if self._ser_left:
-            self._ser_left.write((left_dir + "\n").encode())
-            self._ser_left.write((left_rpm + "\n").encode())
+    def send_uart(self, left_dir, left_rpm, right_dir, right_rpm):
+        with self._lock:
+            left  = self._ser_left
+            right = self._ser_right
 
-        if self._ser_right:
-            self._ser_right.write((right_dir + "\n").encode())
-            self._ser_right.write((right_rpm + "\n").encode())
+        try:
+            if left and left.is_open:
+                left.write((left_dir  + "\n").encode())
+                left.write((left_rpm  + "\n").encode())
+        except serial.SerialException as e:
+            print(f"[send_uart] Error escribiendo a ESP_L: {e}")
+            with self._lock:
+                self._ser_left = None
+
+        try:
+            if right and right.is_open:
+                right.write((right_dir + "\n").encode())
+                right.write((right_rpm + "\n").encode())
+        except serial.SerialException as e:
+            print(f"[send_uart] Error escribiendo a ESP_R: {e}")
+            with self._lock:
+                self._ser_right = None
 
     def close(self):
         """Cierra las conexiones seriales."""

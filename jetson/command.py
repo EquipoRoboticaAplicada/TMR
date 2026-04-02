@@ -3,24 +3,10 @@ import time
 
 
 class Route_Command:
-    def __init__(self, sender, vision_override_event):
-        """
-        sender               : instancia de SenderJetson
-                               (todos los comandos pasan por él para respetar prioridades)
-        vision_override_event: threading.Event de ImgProcessorJetson
-        """
-        self.path = [
-            (3, 0),
-            (3, 3),
-            (0, 3),
-            (0, 0),
-            (3, 3)
-        ]
+    def __init__(self, sender, vision_override_event, path=None):
+        self.path = path or [(3,0),(3,3),(0,3),(0,0),(3,3)]
         self.sender          = sender
         self.vision_override = vision_override_event
-
-    def set_path(self):
-        return self.path
 
     def follow_path(self, rover_odometry):
         DIST_TOLERANCE  = 0.2   # m   — distancia para considerar que se llegó al punto
@@ -61,6 +47,7 @@ class Route_Command:
             # --- RECÁLCULO DEL PUNTO MÁS CERCANO tras retomar control ---
             if was_tracking:
                 was_tracking = False
+                stop()  # detener antes de recalcular para evitar inestabilidad
                 current_x, current_y, _ = rover_odometry.pose
                 print("Seguimiento terminado. Calculando el próximo punto más cercano...")
 
@@ -107,7 +94,5 @@ class Route_Command:
         stop()
 
 
-def normalize_angle(angle):
-    while angle >  math.pi: angle -= 2.0 * math.pi
-    while angle < -math.pi: angle += 2.0 * math.pi
-    return angle
+def normalize_angle(angle: float) -> float:
+    return math.atan2(math.sin(angle), math.cos(angle))

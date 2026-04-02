@@ -76,19 +76,16 @@ class RoverOdometry:
             self._state = new_state
 
         now = time.time()
-        dt  = now - self._last_pose_update
-        if dt <= 0:
-            return
-        self._last_pose_update = now
-
-        with self._state_lock:
-            v_l = self._state["left_side"]["motors"][0]["m/s"]
-            v_r = self._state["right_side"]["motors"][0]["m/s"]
-
-        v     = (v_l + v_r) / 2.0
-        omega = (v_r - v_l) / self.L
-
         with self._pose_lock:
+            dt = now - self._last_pose_update
+            if dt <= 0:
+                return
+            self._last_pose_update = now
+            v_l = sum(m["m/s"] for m in self._state["left_side"]["motors"]) / 3.0
+            v_r = sum(m["m/s"] for m in self._state["right_side"]["motors"]) / 3.0
+
+            v = (v_l + v_r) / 2.0
+            omega = (v_r - v_l) / self.L
             self._x     += v * math.cos(self._theta) * dt
             self._y     += v * math.sin(self._theta) * dt
             self._theta += omega * dt
@@ -121,14 +118,15 @@ class RoverOdometry:
             return self._state[side]["motors"][motor_index]["m/s"]
 
     def reset_pose(self):
-        """Resetea la posición y orientación a cero."""
         with self._pose_lock:
-            self._x     = 0.0
-            self._y     = 0.0
-            self._theta = 0.0
-        self._last_pose_update = time.time()
+            self._x = self._y = self._theta = 0.0
+            self._last_pose_update = time.time()   # ← bajo el mismo lock
 
     def stop(self):
-        """Detiene el hilo de odometría."""
-        self._stop_event.set()
-        self._thread.join(timeout=1.0)
+        # Enviar comando de parada explícito
+        try:
+            self.esp.send_uart("D1", "S0", "D1", "S0")
+        except Exception:
+            pass
+        self.stop_event.set()
+        self.thread.join(timeout=1.0)

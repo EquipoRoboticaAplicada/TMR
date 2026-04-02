@@ -79,7 +79,7 @@ class ImgProcessorJetson:
                 self._tracking = True
                 self.vision_override.set()
 
-            if self._tracking and (self._lost_count >= self.N_EXIT):
+            elif self._tracking and (self._lost_count >= self.N_EXIT):
                 self._tracking = False
                 mode_rotate    = False
                 self.vision_override.clear()
@@ -87,8 +87,7 @@ class ImgProcessorJetson:
             # Lógica de control (solo durante tracking)
             if self._tracking:
                 if detected and frame_w and frame_h:
-                    centroid = (None, cx, cy)
-                    turn = calc_turn_x(centroid, frame_w)
+                    turn = calc_turn_x(cx, frame_w)
 
                     if (not mode_rotate) and (cy >= frame_h * Y_TRIGGER):
                         mode_rotate = True
@@ -214,8 +213,7 @@ class SenderJetson:
 #                           Tools                                                             
 # -----------------------------------------------------------
 
-def calc_turn_x(centroid, frame_width, deadband_px=50):
-    cx       = centroid[1]
+def calc_turn_x(cx, frame_width, deadband_px=50):
     error_px = cx - frame_width / 2
 
     if abs(error_px) < deadband_px:

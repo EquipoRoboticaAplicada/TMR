@@ -2,7 +2,6 @@ from flask import Flask, Response, jsonify
 from video_stream import gen_frames, init_video_stream
 from connect import ESP
 import socket
-import odo
 
 esp: ESP = None
 vision = None
@@ -54,7 +53,7 @@ def pose():
         "omega": omega,
     })
 
-def __run__():
+def run():
     jetson_IP = get_local_ip()
     print(f"Iniciando servidor Flask en http://{jetson_IP}:5000")
     app.run(host=jetson_IP, port=5000, threaded=True, use_reloader=False)

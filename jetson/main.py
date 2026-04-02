@@ -43,7 +43,7 @@ if __name__ == "__main__":
     ).start()
 
     try:
-        server.__run__()
+        server.run()
     finally:
         tracker.stop()
         sender_local.stop()

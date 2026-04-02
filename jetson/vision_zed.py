@@ -125,17 +125,18 @@ class ZEDShared:
         return float(depth_value)
 
     def get_depth_median_neighborhood(self, x: int, y: int, radius: int = 2):
-        vals = []
-        for yy in range(y - radius, y + radius + 1):
-            for xx in range(x - radius, x + radius + 1):
-                d = self.get_depth_at(xx, yy)
-                if d is not None and np.isfinite(d):
-                    vals.append(d)
-
-        if not vals:
-            return None
-
-        return float(np.median(vals))
+        with self.lock:
+            if self.frame_w is None or self.frame_h is None:
+                return None
+            vals = []
+            for yy in range(y - radius, y + radius + 1):
+                for xx in range(x - radius, x + radius + 1):
+                    cx = max(0, min(int(xx), self.frame_w - 1))
+                    cy = max(0, min(int(yy), self.frame_h - 1))
+                    err, d = self.depth_mat.get_value(cx, cy)
+                    if err == sl.ERROR_CODE.SUCCESS and d is not None and np.isfinite(d) and d > 0:
+                        vals.append(float(d))
+        return float(np.median(vals)) if vals else None
 
     def stop(self):
         self.stop_event.set()
@@ -288,13 +289,13 @@ class VisionZED:
 
             frame, ts = result
             h, w = frame.shape[:2]
-            debug_frame = frame.copy()
 
-            colors, centroids, areas = detect_colors(
-                debug_frame if self.draw_local else frame.copy(),
-                self.color_ranges,
-                draw=self.draw_local
-            )
+            if self.draw_local:
+                draw_frame = frame.copy()
+            else:
+                draw_frame = frame   # sin copia extra — detect_colors solo lee para HSV
+
+            colors, centroids, areas = detect_colors(draw_frame, self.color_ranges, draw=self.draw_local)
             target = pick_target(centroids, areas, area_min=self.area_min)
 
             new_state = {

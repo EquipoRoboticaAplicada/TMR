@@ -1,4 +1,3 @@
-# video_stream.py
 import cv2 as cv
 import time
 
@@ -23,20 +22,20 @@ def gen_frames():
     last = 0.0
     while True:
         now = time.time()
-        if now - last < FRAME_PERIOD:
+        remaining = FRAME_PERIOD - (now - last)
+        if remaining > 0:
+            time.sleep(remaining)   # ← cede CPU en lugar de spinear
             continue
-        last = now
+        last = time.time()          # actualizar después del sleep para mayor precisión
 
         result = zed_shared.get_frame_copy()
         if result is None:
+            time.sleep(0.005)
             continue
-
         frame, ts = result
-
         ok, buffer = cv.imencode(".jpg", frame, ENCODE_PARAMS)
         if not ok:
             continue
-
         jpg = buffer.tobytes()
         yield (b'--frame\r\n'
                b'Content-Type: image/jpeg\r\n\r\n' + jpg + b'\r\n')
