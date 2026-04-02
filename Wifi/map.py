@@ -137,6 +137,10 @@ class RoverMap:
 
             while self._running:
                 self._clock.tick(self.fps)
+                
+                # --- Obtener estado del rover ---
+                x, y, theta  = self.receiver.pose
+                v, omega     = self.receiver.velocity
 
                 # --- Eventos ---
                 for event in pygame.event.get():
@@ -146,12 +150,10 @@ class RoverMap:
                     elif event.type == pygame.KEYDOWN:
                         if event.key == pygame.K_r:
                             self.receiver.reset_pose()
+                            x, y, theta = 0.0, 0.0, 0.0
                             self._path.clear()
                             print("🔄 Pose reseteada.")
 
-                # --- Obtener estado del rover ---
-                x, y, theta  = self.receiver.pose
-                v, omega     = self.receiver.velocity
 
                 # Guardar punto en la trayectoria (evitar duplicados estáticos)
                 if not self._path or (x, y) != self._path[-1]:

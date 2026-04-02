@@ -128,5 +128,5 @@ class RoverOdometry:
             self.esp.send_uart("D1", "S0", "D1", "S0")
         except Exception:
             pass
-        self.stop_event.set()
-        self.thread.join(timeout=1.0)
+        self._stop_event.set()
+        self._thread.join(timeout=1.0)
