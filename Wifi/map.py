@@ -107,7 +107,7 @@ class RoverMap:
         signal_text  = "⚠ SIN SEÑAL" if stale else "SEÑAL: OK"
         signal_color = self.STALE_COLOR if stale else self.TEXT_COLOR
         lines = [
-            (f"{'⚠ SIN SEÑAL' if stale else 'SEÑAL : OK'}", signal_color),
+            (signal_text, "\t", signal_color),
             (f"x     : {x:+.3f} m",          self.TEXT_COLOR),
             (f"y     : {y:+.3f} m",          self.TEXT_COLOR),
             (f"θ     : {math.degrees(theta):+.1f}°", self.TEXT_COLOR),
