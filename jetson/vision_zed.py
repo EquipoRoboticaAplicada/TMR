@@ -14,8 +14,8 @@ color_file = Path(__file__).resolve().parent / "config" / "colors.json"
 
 class ZEDShared:
     def __init__(self,
-                 resolution="HD720",
-                 fps=30,
+                 resolution="VGA",
+                 fps=15,
                  depth_mode="NEURAL",
                  min_depth=0.2,
                  max_depth=20.0,
