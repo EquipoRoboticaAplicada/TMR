@@ -178,7 +178,7 @@ class ESP:
                 left.write((left_dir  + "\n").encode())
                 left.write((left_rpm  + "\n").encode())
         except serial.SerialException as e:
-            print(f"[send_uart] Error escribiendo a ESP_L: {e}")
+            print(f"[send_uart] Error escribiendo a ESP: {e}")
             with self._lock:
                 self._ser_left = None
 

@@ -140,7 +140,6 @@ class RoverMap:
                 self._draw_path()
                 self._draw_rover(x, y, theta)
                 self._draw_hud(x, y, theta, v, omega)
-                self._draw_pip()
 
                 pygame.display.flip()
 
