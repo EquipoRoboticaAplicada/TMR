@@ -6,7 +6,7 @@ from vision_zed import VisionZED, ZEDShared
 from util import SenderJetson, ImgProcessorJetson
 from command import Route_Command
 from odo import RoverOdometry
-from debug_local import run_debug
+from local_debug import run_debug
 import threading
 
 
