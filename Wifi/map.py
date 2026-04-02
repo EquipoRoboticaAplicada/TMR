@@ -1,7 +1,5 @@
 import pygame
 import math
-import cv2
-import numpy as np
 from collections import deque
 from receiver import Receiver
 
@@ -107,7 +105,7 @@ class RoverMap:
         signal_text  = "⚠ SIN SEÑAL" if stale else "SEÑAL: OK"
         signal_color = self.STALE_COLOR if stale else self.TEXT_COLOR
         lines = [
-            (signal_text, "\t", signal_color),
+            (signal_text,                            signal_color),
             (f"x     : {x:+.3f} m",          self.TEXT_COLOR),
             (f"y     : {y:+.3f} m",          self.TEXT_COLOR),
             (f"θ     : {math.degrees(theta):+.1f}°", self.TEXT_COLOR),
@@ -118,46 +116,6 @@ class RoverMap:
         for i, (text, color) in enumerate(lines):
             surf = self._font.render(text, True, color)
             self._screen.blit(surf, (10, 10 + i * 18))
-
-    # ------------------------------------------------------------------ #
-    #  PiP de video                                                        #
-    # ------------------------------------------------------------------ #
-
-    def _draw_pip(self):
-        """
-        Obtiene el último frame del receiver, lo escala al tamaño PiP
-        y lo renderiza en la esquina inferior derecha.
-        Si no hay frame disponible, muestra un recuadro de "Sin señal".
-        """
-        frame_bgr = self.receiver.get_frame()
-        pip_rect  = pygame.Rect(self._pip_x, self._pip_y, self.PIP_W, self.PIP_H)
-
-        if frame_bgr is None:
-            # Sin señal: fondo oscuro + texto centrado
-            pygame.draw.rect(self._screen, self.NO_SIGNAL_BG, pip_rect)
-            pygame.draw.rect(self._screen, self.PIP_BORDER,   pip_rect, 1)
-            msg  = self._font.render("SIN VIDEO", True, self.STALE_COLOR)
-            self._screen.blit(
-                msg,
-                (self._pip_x + (self.PIP_W - msg.get_width())  // 2,
-                 self._pip_y + (self.PIP_H - msg.get_height()) // 2)
-            )
-            return
-
-        # Redimensionar con OpenCV (más rápido que pygame.transform.scale para arrays)
-        resized   = cv2.resize(frame_bgr, (self.PIP_W, self.PIP_H),
-                               interpolation=cv2.INTER_LINEAR)
-        frame_rgb = cv2.cvtColor(resized, cv2.COLOR_BGR2RGB)
-
-        # numpy (H, W, C) → pygame surface requiere (W, H, C): swapaxes
-        surface   = pygame.surfarray.make_surface(frame_rgb.swapaxes(0, 1))
-
-        self._screen.blit(surface, (self._pip_x, self._pip_y))
-        pygame.draw.rect(self._screen, self.PIP_BORDER, pip_rect, 1)
-
-        # Etiqueta "CAM ZED" sobre el recuadro
-        label = self._font.render("CAM ZED", True, self.TEXT_COLOR)
-        self._screen.blit(label, (self._pip_x + 4, self._pip_y + 4))
 
     # ------------------------------------------------------------------ #
     #  Bucle principal                                                     #
@@ -177,7 +135,7 @@ class RoverMap:
                         if event.key == pygame.K_r:
                             self.receiver.reset_pose()
                             self._path.clear()
-                            print("Pose reseteada.")
+                            print("[RoverMap] Path limpiado.")
 
                 x, y, theta = self.receiver.pose
                 v, omega    = self.receiver.velocity
@@ -190,7 +148,6 @@ class RoverMap:
                 self._draw_path()
                 self._draw_rover(x, y, theta)
                 self._draw_hud(x, y, theta, v, omega)
-                self._draw_pip()
 
                 pygame.display.flip()
 

@@ -1,9 +1,20 @@
 import requests
 import threading
 import time
+from requests.adapters import HTTPAdapter
 
 import cv2
 import numpy as np
+from typing import Optional
+
+
+def _make_session(retries: int = 0) -> requests.Session:
+    """Crea una sesión requests con política de reintentos configurable."""
+    session = requests.Session()
+    adapter = HTTPAdapter(max_retries=retries)
+    session.mount("http://",  adapter)
+    session.mount("https://", adapter)
+    return session
 
 
 class Receiver:
@@ -40,7 +51,7 @@ class Receiver:
 
         # --- Video ---
         self._frame_lock  = threading.Lock()
-        self._last_frame: np.ndarray | None = None
+        self._last_frame: Optional[np.ndarray] = None
 
         # --- Control de hilos ---
         self._stop_event   = threading.Event()
@@ -66,7 +77,7 @@ class Receiver:
     # ------------------------------------------------------------------ #
 
     def _run_pose(self):
-        session = requests.Session()
+        session = _make_session(retries=0)
         backoff = 1.0
         while not self._stop_event.is_set():
             t0 = time.time()
@@ -199,7 +210,7 @@ class Receiver:
         with self._pose_lock:
             return (time.time() - self._last_update) > self.STALE_TIMEOUT
 
-    def get_frame(self) -> np.ndarray | None:
+    def get_frame(self) -> Optional[np.ndarray]:
         """
         Retorna una copia del último frame BGR recibido, o None si
         el stream aún no ha enviado ningún frame o está desconectado.
@@ -210,14 +221,39 @@ class Receiver:
             return self._last_frame.copy()
 
     def reset_pose(self):
-        """Envía comando de reset de odometría a la Jetson."""
+        """
+        Resetea la pose localmente de inmediato (el mapa responde al instante)
+        y envía el comando al servidor en un hilo separado para no bloquear
+        el bucle de render de pygame.
+        """
+        # 1. Reset local optimista — efecto visual instantáneo
+        with self._pose_lock:
+            self._x     = 0.0
+            self._y     = 0.0
+            self._theta = 0.0
+            self._v     = 0.0
+            self._omega = 0.0
+
+        # 2. Notificar a la Jetson en segundo plano (sin bloquear)
+        threading.Thread(target=self._send_reset, daemon=True).start()
+
+    def _send_reset(self):
+        """Envía POST /pose/reset a la Jetson. Corre en hilo propio."""
+        session = _make_session(retries=0)   # sin reintentos → fallo rápido
         try:
-            r = requests.post(self._reset_url, timeout=1.0)
+            r = session.post(self._reset_url, timeout=2.0)
             r.raise_for_status()
+            print("[Receiver] Reset confirmado por la Jetson.")
+        except requests.exceptions.Timeout:
+            print("[Receiver] Reset enviado localmente — Jetson no respondió (timeout).")
+        except requests.exceptions.ConnectionError:
+            print("[Receiver] Reset enviado localmente — Jetson sin conexión.")
         except requests.exceptions.HTTPError as e:
-            print(f"[Receiver] Reset rechazado ({e.response.status_code}). ¿Existe /pose/reset en Flask?")
+            print(f"[Receiver] Reset rechazado por la Jetson ({e.response.status_code}).")
         except Exception as e:
-            print(f"[Receiver] Error al resetear pose: {e}")
+            print(f"[Receiver] Error inesperado en reset: {e}")
+        finally:
+            session.close()
 
 
 # ------------------------------------------------------------------ #
