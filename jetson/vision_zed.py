@@ -79,7 +79,6 @@ class ZEDShared:
                 if img is None:
                     continue
 
-                # Normalmente la ZED devuelve BGRA
                 if len(img.shape) == 3 and img.shape[2] == 4:
                     frame_bgr = cv.cvtColor(img, cv.COLOR_BGRA2BGR)
                 else:
@@ -102,26 +101,20 @@ class ZEDShared:
         with self.lock:
             if self.frame_w is None or self.frame_h is None:
                 return None
-
             x = max(0, min(int(x), self.frame_w - 1))
             y = max(0, min(int(y), self.frame_h - 1))
-
             err, depth_value = self.depth_mat.get_value(x, y)
 
         if err != sl.ERROR_CODE.SUCCESS:
             return None
-
         if isinstance(depth_value, (list, tuple, np.ndarray)):
             if len(depth_value) == 0:
                 return None
             depth_value = depth_value[0]
-
         if depth_value is None:
             return None
-
         if not np.isfinite(depth_value) or depth_value <= 0:
             return None
-
         return float(depth_value)
 
     def get_depth_median_neighborhood(self, x: int, y: int, radius: int = 2):
@@ -158,15 +151,16 @@ KERNEL = cv.getStructuringElement(cv.MORPH_ELLIPSE, (5, 5))
 
 
 def load_color_ranges():
-    try: 
+    try:
         with open(color_file, "r", encoding="utf-8") as f:
             return json.load(f)
     except FileNotFoundError as e:
         print(f"Error al cargar {color_file}: {e}")
         return {}
 
+
 def process_mask(mask):
-    mask = cv.morphologyEx(mask, cv.MORPH_OPEN, KERNEL, iterations=1)
+    mask = cv.morphologyEx(mask, cv.MORPH_OPEN,  KERNEL, iterations=1)
     mask = cv.morphologyEx(mask, cv.MORPH_CLOSE, KERNEL, iterations=1)
     return mask
 
@@ -183,13 +177,11 @@ def find_and_draw(mask, frame_draw, label, draw=True):
         if area > MIN_AREA:
             found = True
             areas.append(area)
-
             M = cv.moments(cnt)
             if M["m00"] != 0:
                 cx = int(M["m10"] / M["m00"])
                 cy = int(M["m01"] / M["m00"])
                 detected_centroids.append((label, cx, cy))
-
                 if draw:
                     x, y, w, h = cv.boundingRect(cnt)
                     color_bgr = DRAW.get(label, (255, 255, 255))
@@ -202,36 +194,32 @@ def find_and_draw(mask, frame_draw, label, draw=True):
 
 
 def detect_colors(frame, color_ranges, draw=False):
-    colors = []
+    colors    = []
     centroids = []
-    areas = []
+    areas     = []
 
     blurred = cv.GaussianBlur(frame, (5, 5), 0)
-    hsv = cv.cvtColor(blurred, cv.COLOR_BGR2HSV)
+    hsv     = cv.cvtColor(blurred, cv.COLOR_BGR2HSV)
 
     for color, ranges in color_ranges.items():
         if isinstance(ranges, dict):
             lower = np.array(ranges["lower"], dtype=np.uint8)
             upper = np.array(ranges["upper"], dtype=np.uint8)
-            mask = cv.inRange(hsv, lower, upper)
-
+            mask  = cv.inRange(hsv, lower, upper)
         elif isinstance(ranges, list):
             mask = None
             for r in ranges:
                 lower = np.array(r["lower"], dtype=np.uint8)
                 upper = np.array(r["upper"], dtype=np.uint8)
-                m = cv.inRange(hsv, lower, upper)
-                mask = m if mask is None else cv.bitwise_or(mask, m)
-
+                m     = cv.inRange(hsv, lower, upper)
+                mask  = m if mask is None else cv.bitwise_or(mask, m)
             if mask is None:
                 continue
         else:
             continue
 
         mask = process_mask(mask)
-
         found, c_list, a_list = find_and_draw(mask, frame, color, draw)
-
         if found:
             colors.extend([color] * len(c_list))
             centroids.extend(c_list)
@@ -254,24 +242,24 @@ def pick_target(centroids, areas, area_min=1500):
 
 class VisionZED:
     def __init__(self, zed_shared, area_min=500, draw_local=False):
-        self.zed = zed_shared
+        self.zed         = zed_shared
         self.color_ranges = load_color_ranges()
-        self.area_min = area_min
-        self.draw_local = draw_local
+        self.area_min    = area_min
+        self.draw_local  = draw_local   # solo controla si detect_colors dibuja en el frame
 
-        self.lock = threading.Lock()
+        self.lock       = threading.Lock()
         self.stop_event = threading.Event()
-        self.thread = None
+        self.thread     = None
 
         self.state = {
-            "detected": False,
-            "label": None,
-            "cx": None,
-            "cy": None,
-            "area": None,
-            "distance_m": None,
-            "timestamp": 0.0,
-            "frame_width": None,
+            "detected":     False,
+            "label":        None,
+            "cx":           None,
+            "cy":           None,
+            "area":         None,
+            "distance_m":   None,
+            "timestamp":    0.0,
+            "frame_width":  None,
             "frame_height": None
         }
 
@@ -290,56 +278,44 @@ class VisionZED:
             frame, ts = result
             h, w = frame.shape[:2]
 
-            if self.draw_local:
-                draw_frame = frame.copy()
-            else:
-                draw_frame = frame   # sin copia extra — detect_colors solo lee para HSV
+            # draw_local=True  → copia el frame para que detect_colors dibuje encima
+            # draw_local=False → usa el frame directo (sin copia), solo lectura HSV
+            draw_frame = frame.copy() if self.draw_local else frame
 
-            colors, centroids, areas = detect_colors(draw_frame, self.color_ranges, draw=self.draw_local)
+            colors, centroids, areas = detect_colors(
+                draw_frame, self.color_ranges, draw=self.draw_local
+            )
             target = pick_target(centroids, areas, area_min=self.area_min)
 
             new_state = {
-                "detected": False,
-                "label": None,
-                "cx": None,
-                "cy": None,
-                "area": None,
-                "distance_m": None,
-                "timestamp": ts,
-                "frame_width": w,
-                "frame_height": h
+                "detected":     False,
+                "label":        None,
+                "cx":           None,
+                "cy":           None,
+                "area":         None,
+                "distance_m":   None,
+                "timestamp":    ts,
+                "frame_width":  w,
+                "frame_height": h,
+                "draw_frame":   draw_frame if self.draw_local else None,
             }
 
             if target is not None:
                 centroid, area = target
-                label, cx, cy = centroid
-                distance_m = self.zed.get_depth_median_neighborhood(cx, cy, radius=2)
+                label, cx, cy  = centroid
+                distance_m     = self.zed.get_depth_median_neighborhood(cx, cy, radius=2)
 
                 new_state.update({
-                    "detected": True,
-                    "label": label,
-                    "cx": int(cx),
-                    "cy": int(cy),
-                    "area": float(area),
+                    "detected":   True,
+                    "label":      label,
+                    "cx":         int(cx),
+                    "cy":         int(cy),
+                    "area":       float(area),
                     "distance_m": distance_m,
-                    "timestamp": ts,
-                    "frame_width": w,
-                    "frame_height": h
                 })
-
-                if self.draw_local:
-                    txt = f"Dist: {distance_m:.2f} m" if distance_m is not None else "Dist: invalida"
-                    cv.putText(debug_frame, txt, (cx + 10, cy + 20),
-                               cv.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
 
             with self.lock:
                 self.state = new_state
-
-            if self.draw_local:
-                cv.imshow("VISION ZED (JETSON)", debug_frame)
-                if cv.waitKey(1) & 0xFF == 27:
-                    self.stop_event.set()
-                    break
 
     def get_state(self):
         with self.lock:
@@ -349,5 +325,3 @@ class VisionZED:
         self.stop_event.set()
         if self.thread is not None:
             self.thread.join(timeout=1.0)
-        if self.draw_local:
-            cv.destroyAllWindows()
