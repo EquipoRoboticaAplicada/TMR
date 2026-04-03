@@ -138,7 +138,7 @@ class ImgProcessorJetson:
 
 class SenderJetson:
 
-    MAX_RPM = 67
+    MAX_RPM = 30
 
     def __init__(self, esp):
         """

@@ -169,26 +169,26 @@ class ESP:
             return copy.deepcopy(self._rover_state)
 
     def send_uart(self, left_dir, left_rpm, right_dir, right_rpm):
+        for val in (left_dir, left_rpm, right_dir, right_rpm):
+            assert isinstance(val, str), f"Tipo inválido: {val!r}"
+
         with self._lock:
             left  = self._ser_left
             right = self._ser_right
-
-        try:
-            if left and left.is_open:
-                left.write((left_dir  + "\n").encode())
-                left.write((left_rpm  + "\n").encode())
-        except serial.SerialException as e:
-            print(f"[send_uart] Error escribiendo a ESP: {e}")
-            with self._lock:
+            try:
+                if left and left.is_open:
+                    left.write((left_dir  + "\n").encode())
+                    left.write((left_rpm  + "\n").encode())
+            except serial.SerialException as e:
+                print(f"[send_uart] Error escribiendo a ESP: {e}")
                 self._ser_left = None
 
-        try:
-            if right and right.is_open:
-                right.write((right_dir + "\n").encode())
-                right.write((right_rpm + "\n").encode())
-        except serial.SerialException as e:
-            print(f"[send_uart] Error escribiendo a ESP_R: {e}")
-            with self._lock:
+            try:
+                if right and right.is_open:
+                    right.write((right_dir + "\n").encode())
+                    right.write((right_rpm + "\n").encode())
+            except serial.SerialException as e:
+                print(f"[send_uart] Error escribiendo a ESP_R: {e}")
                 self._ser_right = None
 
     def close(self):
