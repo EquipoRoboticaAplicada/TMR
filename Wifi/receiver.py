@@ -116,7 +116,7 @@ class Receiver:
             r = requests.post(self._reset_url, timeout=2.0)
             r.raise_for_status()
 
-            with self.lock:
+            with self._lock:
                 self._x=0.0
                 self._y=0.0
                 self._theta=0.0

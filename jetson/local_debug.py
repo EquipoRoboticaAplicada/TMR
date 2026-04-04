@@ -96,7 +96,6 @@ def run_debug(zed: ZEDShared, vision: VisionZED, odo=None):
             break
         if key == ord('r') and odo is not None:
             odo.reset_pose()
-            print(f"[reset_pose] Pose reseteada")
 
     cv2.destroyAllWindows()
     print("[debug] Ventana cerrada.")
