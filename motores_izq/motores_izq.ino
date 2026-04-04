@@ -6,11 +6,8 @@ const char* ESP_ID = "ESP_L";
 const int IN1[3] = {13, 26, 25};  // RPWM
 const int IN2[3] = {14, 27, 23};  // LPWM
 
-// FIX #1: Los pines de encoder YA NO comparten pines con IN1/IN2.
-// Antes: ENC_A = {32, 25, 26} → pines 25 y 26 colisionaban con IN1[2] e IN1[1].
-// Ajusta estos valores a los pines físicos reales que uses para encoders.
-const int ENC_A[3] = {32, 34, 36};  // ← CORRECCIÓN: pines sin conflicto
-const int ENC_B[3] = {33, 35, 39};  // ← CORRECCIÓN: pines sin conflicto
+const int ENC_A[3] = {4,  16, 18};
+const int ENC_B[3] = {5,  17, 19};
 
 #define PWM_FREQ       20000
 #define PWM_RESOLUTION 10
@@ -22,21 +19,19 @@ const int   PULSES_PER_REV  = 16;
 const int   CPR_OUTPUT      = PULSES_PER_REV * 4 * GEAR_RATIO; // 3600
 
 const unsigned long SAMPLE_MS = 100;
+const unsigned long DIR_CHANGE_HOLD_MS = 120;
 
 const float WHEEL_DIAM_M = 0.062f;
 const float WHEEL_CIRC_M = 3.14159265f * WHEEL_DIAM_M;
 
-uint32_t seq = 0;
-
-// PID gains
 float Kp[3] = {0.0, 0.0, 0.0};
 float Ki[3] = {1.0, 1.0, 1.0};
 float Kd[3] = {0.0, 0.0, 0.0};
 const float INTEGRAL_MAX = 200.0;
 
-// Failsafe
 const unsigned long CMD_TIMEOUT_MS = 400;
 unsigned long lastCmdMs = 0;
+unsigned int seq = 0; 
 
 struct PIDState {
   float setpointRPM = 0.0;
@@ -46,13 +41,13 @@ struct PIDState {
   float errorPrev   = 0.0;
   float pidOutput   = 0.0;
   float pwmPercent  = 0.0;
-  bool  direction   = true;
+  bool  direction   = false;
+  unsigned long inhibitUntilMs = 0;
 };
 
 PIDState motor[3];
 
-volatile long  ticks[3]        = {0, 0, 0};
-// FIX #2: estado previo por encoder para decodificación x4 confiable
+volatile long   ticks[3] = {0, 0, 0};
 volatile int8_t lastEncState[3] = {0, 0, 0};
 
 unsigned long lastSampleTime = 0;
@@ -72,11 +67,11 @@ void IRAM_ATTR encoderISR(void* arg) {
 
   // Secuencia forward:  00→10→11→01→00  (+1 cada transición válida)
   // Secuencia backward: 00→01→11→10→00  (-1 cada transición válida)
-  static const int8_t lookup[16] = {
-     0,  1, -1,  0,
-    -1,  0,  0,  1,
-     1,  0,  0, -1,
-     0, -1,  1,  0
+    static const int8_t lookup[16] = {
+      0,  -1, 1,  0,
+      1,  0,  0,  -1,
+     -1,  0,  0, 1,
+      0, 1,  -1,  0
   };
 
   ticks[i] += lookup[(prev << 2) | state];
@@ -93,12 +88,17 @@ float calcularRPM(long dticks, float dt) {
 float computePID(PIDState &m, float dt, float Kp, float Ki, float Kd, float integralMax) {
   if (dt <= 0) return m.pidOutput;
 
-  m.error = m.setpointRPM - fabsf(m.currentRPM);
+  // Alinear la velocidad medida con la dirección comandada:
+  // D1 -> usa RPM tal cual
+  // D0 -> invierte el signo para que "reversa correcta" se vea positiva
+  float rpmAligned = m.direction ? m.currentRPM : -m.currentRPM;
+
+  m.error = m.setpointRPM - rpmAligned;
 
   float P = Kp * m.error;
 
   m.errorSum += m.error * dt;
-  m.errorSum  = constrain(m.errorSum, -integralMax, integralMax);
+  m.errorSum = constrain(m.errorSum, -integralMax, integralMax);
   float I = Ki * m.errorSum;
 
   float errorDiff = (m.error - m.errorPrev) / dt;
@@ -152,8 +152,25 @@ void handleLine(String line) {
 
   if (line[0] == 'D') {
     bool dir = (line.substring(1).toInt() == 1);
-    for (int i = 0; i < 3; i++) motor[i].direction = dir;
-    lastCmdMs = millis();
+    unsigned long tNow = millis();
+
+    for (int i = 0; i < 3; i++) {
+      if (motor[i].direction != dir) {
+        motor[i].direction = dir;
+
+        // Reset del controlador al invertir sentido
+        motor[i].error       = 0.0f;
+        motor[i].errorSum    = 0.0f;
+        motor[i].errorPrev   = 0.0f;
+        motor[i].pidOutput   = 0.0f;
+        motor[i].pwmPercent  = 0.0f;
+
+        // Pequeña pausa para evitar reversa instantánea
+        motor[i].inhibitUntilMs = tNow + DIR_CHANGE_HOLD_MS;
+      }
+    }
+
+    lastCmdMs = tNow;
     return;
   }
 
@@ -243,16 +260,21 @@ void loop() {
 
     for (int i = 0; i < 3; i++) {
       motor[i].currentRPM = calcularRPM(dticks[i], dt);
-      motor[i].pwmPercent = computePID(motor[i], dt, Kp[i], Ki[i], Kd[i], INTEGRAL_MAX);
-      setMotorPins(IN1[i], IN2[i], motor[i].pwmPercent, motor[i].direction);
-
-      // FIX #3: velocidad con signo real de encoder, no de dirección comandada
+    
+      if (now < motor[i].inhibitUntilMs) {
+        motor[i].pwmPercent = 0.0f;
+        setMotorPins(IN1[i], IN2[i], 0.0f, motor[i].direction);
+      } else {
+        motor[i].pwmPercent = computePID(motor[i], dt, Kp[i], Ki[i], Kd[i], INTEGRAL_MAX);
+        setMotorPins(IN1[i], IN2[i], motor[i].pwmPercent, motor[i].direction);
+      }
+    
       v_mps[i] = calcularVelocidadMPS(dticks[i], dt);
     }
     
-     // Paquete UART: ID, seq, rpm0, v0, rpm1, v1, rpm2, v2
+      // Paquete UART: ID, seq, rpm0, v0, rpm1, v1, rpm2, v2
       Serial.print(ESP_ID); Serial.print(",");
-      Serial.print(seq++); 
+      Serial.print(seq++);
 
       for (int i = 0; i < 3; i++) {
         Serial.print(",");
@@ -263,11 +285,14 @@ void loop() {
       Serial.println();
 
       // Diagnóstico
-//    Serial.print("SP:");
-//    Serial.print(motor[0].setpointRPM);
-//    Serial.print("\t");
-//    Serial.print("PV:");
-//    Serial.println(calcularRPM(dticks[0], dt));
+//      for(int i = 0; i < 0; i++)
+//      {
+//        Serial.print(" SP:"); Serial.print(motor[i].setpointRPM);
+//        Serial.print(" PV:"); Serial.print(motor[i].currentRPM);
+//        Serial.print(" ERR:"); Serial.print(motor[i].errorSum);
+//        Serial.print(" PWM:"); Serial.print(motor[i].pwmPercent);
+//        Serial.println();  
+//      }
 
     lastSampleTime = now;
   }

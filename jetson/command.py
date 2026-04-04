@@ -52,16 +52,16 @@ class Route_Command:
                 print("Seguimiento terminado. Calculando el próximo punto más cercano...")
 
                 min_dist   = float('inf')
-                best_index = current_index
+                # best_index = current_index
 
-                for i in range(current_index, len(self.path)):
-                    wx, wy = self.path[i]
-                    dist = math.hypot(wx - current_x, wy - current_y)
-                    if dist < min_dist:
-                        min_dist   = dist
-                        best_index = i
+                # for i in range(current_index, len(self.path)):
+                #     wx, wy = self.path[i]
+                #     dist = math.hypot(wx - current_x, wy - current_y)
+                #     if dist < min_dist:
+                #         min_dist   = dist
+                #         best_index = i
 
-                current_index      = best_index
+                # current_index      = best_index
                 target_x, target_y = self.path[current_index]
                 print(f"Resumiendo ruta hacia el punto: {self.path[current_index]}")
 
