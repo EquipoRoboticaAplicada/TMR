@@ -60,10 +60,10 @@ def run_debug(zed: ZEDShared, vision: VisionZED, odo=None):
         cy_c  = h // 2
 
         # ── Crosslines ─────────────────────────────────────────────────
-        cv.line(frame (cx-50, 0), (cx-50, h), (255,255,255), 1)
-        cv.line(frame, (cx+50, 0), (cx+50, h), (255,255,255), 1)
-        cv.line(frame, (0, cy-40), (w, cy-40), (255,255,255), 1)
-        cv.line(frame, (0, cy+70), (w, cy+70), (255,255,255), 1)
+        cv.line(frame, (cx_c-50, 0), (cx_c-50, h), (255,255,255), 1)
+        cv.line(frame, (cx_c+50, 0), (cx_c+50, h), (255,255,255), 1)
+        cv.line(frame, (0, cy_c-40), (w, cy_c-40), (255,255,255), 1)
+        cv.line(frame, (0, cy_c+70), (w, cy_c+70), (255,255,255), 1)
         
         # ── Anotaciones de detección (solo si draw_local=False, para no duplicar)
         if draw_frame is None and detected and cx is not None and cy is not None:
