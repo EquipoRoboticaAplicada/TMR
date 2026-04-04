@@ -72,6 +72,7 @@ class RoverOdometry:
             θ    += omega · dt
         """
         new_state = self.esp.get_rover_state()
+        print(f"[RoverOdometry] Nuevo rover_state: {new_state}") # DEBUG
         with self._state_lock:
             self._state = new_state
 
