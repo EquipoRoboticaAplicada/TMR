@@ -84,6 +84,7 @@ class RoverOdometry:
             self._last_pose_update = now
             v_l = sum(m["m/s"] for m in self._state["left_side"]["motors"]) / 3.0
             v_r = sum(m["m/s"] for m in self._state["right_side"]["motors"]) / 3.0
+            print(f"[RoverOdometry] v_l: {v_l:.3f} m/s, v_r: {v_r:.3f} m/s") # DEBUG
 
             v = (v_l + v_r) / 2.0
             omega = (v_r - v_l) / self.L
