@@ -93,29 +93,44 @@ class ESP:
             print(f"Error conectando a {port}: {e}")
 
     def _read_serial_thread(self, ser_obj, side: str):
-        while ser_obj and ser_obj.is_open:
+        while True:
             try:
+                if ser_obj is None or not ser_obj.is_open:
+                    break
+
                 raw = ser_obj.readline()
                 if not raw:
                     continue
-                line = raw.decode('utf-8', errors='ignore').strip()
-                
-                # Parsear y actualizar rover_state
+
+                line = raw.decode("utf-8", errors="ignore").strip()
+
                 if line.startswith("ESP_L") or line.startswith("ESP_R"):
                     self._parse_esp_line(line)
+
             except serial.SerialException as e:
                 print(f"Error serial ({side}): {e}")
+
                 with self._lock:
-                    if side == "left":
+                    try:
+                        if ser_obj and ser_obj.is_open:
+                            ser_obj.close()
+                    except Exception:
+                        pass
+
+                    if side == "left" and self._ser_left is ser_obj:
                         self._ser_left = None
-                    else:
+                    elif side == "right" and self._ser_right is ser_obj:
                         self._ser_right = None
+
+                break
+
+            except Exception as e:
+                print(f"Error inesperado leyendo serial ({side}): {e}")
                 break
 
     def _parse_esp_line(self, line: str):
         """
-        Parsea la trama de telemetría y actualiza _rover_state.
-        Formato: ESP_L/R, seq, ticks0, v0, ticks1, v1, ticks2, v2
+        Formato: ESP_L/R, seq, rpm0, v0, rpm1, v1, rpm2, v2
         """
         if not line:
             return
@@ -194,9 +209,11 @@ class ESP:
                 self._ser_right = None
 
     def close(self):
-        """Cierra las conexiones seriales."""
-        if self._ser_left  and self._ser_left.is_open:
-            self._ser_left.close()
-        if self._ser_right and self._ser_right.is_open:
-            self._ser_right.close()
+        with self._lock:
+            if self._ser_left and self._ser_left.is_open:
+                self._ser_left.close()
+            if self._ser_right and self._ser_right.is_open:
+                self._ser_right.close()
+            self._ser_left = None
+            self._ser_right = None
         print("🛑 Conexiones seriales cerradas.\n")
