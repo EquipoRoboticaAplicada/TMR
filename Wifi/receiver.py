@@ -112,15 +112,22 @@ class Receiver:
 
     def reset_pose(self):
         try:
-            r = session.post(self._reset_url, timeout=2.0)
+        
+            r = requests.post(self._reset_url, timeout=2.0)
             r.raise_for_status()
+
+            with self.lock:
+                self._x=0.0
+                self._y=0.0
+                self._theta=0.0
+                self._v=0.0
+                self._omega=0.0
             print("[Receiver] Pose reseteada.")
         except requests.exceptions.HTTPError as e:
             print(f"[Receiver] Reset rechazado ({e.response.status_code}).")
         except Exception as e:
             print(f"[Receiver] Error inesperado en reset: {e}")
-        finally:
-            session.close()
+        
 
 
 # ------------------------------------------------------------------ #
