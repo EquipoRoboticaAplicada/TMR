@@ -9,6 +9,8 @@ from odo import RoverOdometry
 from local_debug import run_debug
 import threading
 
+DRAW_LOCAL = True   # ← cambiar a False para desactivar la ventana de debug
+
 
 if __name__ == "__main__":
     # 1. Conexión serial con los ESP32
@@ -48,13 +50,30 @@ if __name__ == "__main__":
         daemon=True
     ).start()
 
-    # 9. Debug local — corre en el hilo principal para que OpenCV funcione
-    try:
-        run_debug(zed, vision, odo)
-    finally:
-        tracker.stop()
-        sender_local.stop()
-        vision.stop()
-        zed.stop()
-        odo.stop()
-        esp.close()
+    # 9. Debug local — solo si DRAW_LOCAL está activo
+    #    Corre en el hilo principal porque OpenCV lo requiere
+    if DRAW_LOCAL:
+        from local_debug import run_debug
+        try:
+            run_debug(zed, vision, odo)
+        finally:
+            tracker.stop()
+            sender_local.stop()
+            vision.stop()
+            zed.stop()
+            odo.stop()
+            esp.close()
+    else:
+        # Sin debug: Flask ya corre en su hilo, el proceso vive hasta Ctrl+C
+        try:
+            threading.Event().wait()
+        except KeyboardInterrupt:
+            pass
+        finally:
+            tracker.stop()
+            sender_local.stop()
+            vision.stop()
+            zed.stop()
+            odo.stop()
+            esp.close()
+ 
