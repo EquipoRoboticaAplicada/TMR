@@ -16,7 +16,6 @@ if __name__ == "__main__":
     # 1. Conexión serial con los ESP32
     esp = ESP()
     esp.connect()
-    esp.connect()
     esp.send_uart("D1", "S0", "D1", "S0")  # fuerza parada inicial
 
     # 2. Odometría (inicia su propio hilo interno)
