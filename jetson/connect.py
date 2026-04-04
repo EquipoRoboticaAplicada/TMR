@@ -51,7 +51,15 @@ class ESP:
 
     def _try_connect_port(self, port: str):
         try:
-            s = serial.Serial(port, self.BAUDRATE, timeout=0.1)
+            s = serial.Serial(
+                port,
+                self.BAUDRATE,
+                timeout=0.1,
+                exclusive=True,   # POSIX
+                xonxoff=False,
+                rtscts=False,
+                dsrdtr=False,
+            )
             print(f"Probando {port}...")
 
             deadline = time.time() + 3.0
