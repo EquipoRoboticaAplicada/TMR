@@ -55,7 +55,7 @@ if __name__ == "__main__":
     if DRAW_LOCAL:
         from local_debug import run_debug
         try:
-            run_debug(zed, vision, odo)
+            run_debug(zed, vision, odo, rvr_cmd)
         finally:
             tracker.stop()
             sender_local.stop()

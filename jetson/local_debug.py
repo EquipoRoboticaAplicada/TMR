@@ -5,7 +5,7 @@ import math
 from vision_zed import VisionZED, ZEDShared
 
 
-def run_debug(zed: ZEDShared, vision: VisionZED, odo=None):
+def run_debug(zed: ZEDShared, vision: VisionZED, odo=None, cmd=None):
 
     FONT        = cv.FONT_HERSHEY_SIMPLEX
     COLOR_INFO  = (0, 255, 255)
@@ -98,6 +98,8 @@ def run_debug(zed: ZEDShared, vision: VisionZED, odo=None):
             break
         if key == ord('r') and odo is not None:
             odo.reset_pose()
+            cmd.reset_path()
+
 
     cv.destroyAllWindows()
     print("[debug] Ventana cerrada.")
