@@ -190,7 +190,7 @@ class ESP:
         with self._lock:
             left  = self._ser_left
             right = self._ser_right
-            # print(f"Enviando UART → L: {left_rpm} | R: {right_rpm}")
+            print(f"Enviando UART → L: {left_rpm} | R: {right_rpm}")
 
             try:
                 if left and left.is_open:
