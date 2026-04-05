@@ -1,12 +1,19 @@
 import math
 import time
 
-
 class Route_Command:
+
     def __init__(self, sender, vision_override_event, path=None):
-        self.path = path or [(3,0),(3,3),(0,3),(0,0),(3,3)]
+        self.default_route = [(3,0),(3,3),(0,3),(0,0),(3,3)]
+        self.path = path or self.default_route
         self.sender          = sender
         self.vision_override = vision_override_event
+
+    def reset_path(self):
+        self.path = self.default_route
+
+    def set_path(self, path):
+        self.path = path
 
     def follow_path(self, rover_odometry):
         DIST_TOLERANCE  = 0.2   # m   — distancia para considerar que se llegó al punto

@@ -34,15 +34,16 @@ if __name__ == "__main__":
     tracker = ImgProcessorJetson(vision)
     tracker.start(sender_local)
 
-    # 7. Servidor Flask en hilo secundario (OpenCV necesita el hilo principal)
-    server.init_app(esp, zed, vision, tracker, odo)
-    threading.Thread(target=server.run, daemon=True).start()
-
-    # 8. Ruta autónoma
+    # 7. Ruta autónoma
     rvr_cmd = Route_Command(
         sender=sender_local,
         vision_override_event=tracker.vision_override
     )
+
+    # 8. Servidor Flask en hilo secundario (OpenCV necesita el hilo principal)
+    server.init_app(esp, zed, vision, tracker, odo, rvr_cmd)
+    threading.Thread(target=server.run, daemon=True).start()
+
     threading.Thread(
         target=rvr_cmd.follow_path,
         args=(odo,),
