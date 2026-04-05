@@ -195,7 +195,7 @@ class SenderJetson:
                     self.latest_route = None
 
             if payload:
-                print(f"[SenderJetson] Enviando comando: {payload}") # DEBUG
+                # print(f"[SenderJetson] Enviando comando: {payload}") # DEBUG
                 self.esp.send_uart(
                     payload["left_dir"],
                     payload["left_rpm"],

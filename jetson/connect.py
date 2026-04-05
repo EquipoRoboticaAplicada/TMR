@@ -180,7 +180,7 @@ class ESP:
         Usar siempre esta función desde server.py, nunca acceder a _rover_state directamente.
         """
         with self._lock:
-            # print((self._rover_state)) # Debug
+            # print((self._rover_state)) # DEBUG
             return copy.deepcopy(self._rover_state)
 
     def send_uart(self, left_dir, left_rpm, right_dir, right_rpm):
@@ -190,7 +190,7 @@ class ESP:
         with self._lock:
             left  = self._ser_left
             right = self._ser_right
-            print(f"Enviando UART → L: {left_rpm} | R: {right_rpm}")
+            # print(f"Enviando UART → L: {left_rpm} | R: {right_rpm}") # DEBUG
 
             try:
                 if left and left.is_open:
