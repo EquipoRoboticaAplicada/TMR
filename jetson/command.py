@@ -1,12 +1,20 @@
 import math
 import time
 
-
 class Route_Command:
+
     def __init__(self, sender, vision_override_event, path=None):
-        self.path = path or [(3,0),(3,3),(0,3),(0,0),(3,3)]
+        self.default_route = [(3,0),(3,3),(0,3),(0,0),(3,3)]
+        self.path = path or self.default_route
         self.sender          = sender
         self.vision_override = vision_override_event
+        self.current_index = 0
+
+    def reset_path(self):
+        self.current_index = 0
+
+    def set_path(self, path):
+        self.path = path
 
     def follow_path(self, rover_odometry):
         DIST_TOLERANCE  = 0.2   # m   — distancia para considerar que se llegó al punto
@@ -32,11 +40,10 @@ class Route_Command:
         def stop():
             self.sender.send_route(FWD, STOP, FWD, STOP)
 
-        current_index = 0
         was_tracking  = False
 
-        while current_index < len(self.path):
-            target_x, target_y = self.path[current_index]
+        while self.current_index < len(self.path):
+            target_x, target_y = self.path[self.current_index]
 
             # --- PRIORIDAD DE VISIÓN ---
             if self.vision_override.is_set():
@@ -62,8 +69,8 @@ class Route_Command:
                 #         best_index = i
 
                 # current_index      = best_index
-                target_x, target_y = self.path[current_index]
-                print(f"Resumiendo ruta hacia el punto: {self.path[current_index]}")
+                target_x, target_y = self.path[self.current_index]
+                print(f"Resumiendo ruta hacia el punto: {self.path[self.current_index]}")
 
             # --- LÓGICA NORMAL DE SEGUIMIENTO ---
             current_x, current_y, current_theta = rover_odometry.pose
@@ -76,8 +83,8 @@ class Route_Command:
             angle_error  = normalize_angle(target_angle - current_theta)
 
             if distance < DIST_TOLERANCE:
-                print(f"Se ha llegado al punto: {self.path[current_index]} :)")
-                current_index += 1
+                print(f"Se ha llegado al punto: {self.path[self.current_index]} :)")
+                self.current_index += 1
                 continue
 
             if abs(angle_error) > ANGLE_TOLERANCE:
