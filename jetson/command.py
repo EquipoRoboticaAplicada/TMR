@@ -47,6 +47,7 @@ class Route_Command:
             # --- RECÁLCULO DEL PUNTO MÁS CERCANO tras retomar control ---
             if was_tracking:
                 was_tracking = False
+                stop()  # detener antes de recalcular para evitar inestabilidad
                 current_x, current_y, _ = rover_odometry.pose
                 print("Seguimiento terminado. Calculando el próximo punto más cercano...")
 
