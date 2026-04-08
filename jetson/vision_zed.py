@@ -84,6 +84,8 @@ class ZEDShared:
                 else:
                     frame_bgr = img.copy()
 
+                frame_bgr=cv.rotate(frame_bgr,cv.ROTATE_180)
+
                 with self.lock:
                     self.last_frame_bgr = frame_bgr
                     self.frame_h, self.frame_w = frame_bgr.shape[:2]
