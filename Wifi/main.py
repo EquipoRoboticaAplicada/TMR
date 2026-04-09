@@ -2,7 +2,7 @@ import sys
 from map import RoverMap
 from receiver import Receiver
 
-DEFAULT_IP = "192.168.1.82"
+DEFAULT_IP = "172.32.237.112"
 
 if __name__ == "__main__":
     jetson_ip = sys.argv[1] if len(sys.argv) > 1 else DEFAULT_IP
