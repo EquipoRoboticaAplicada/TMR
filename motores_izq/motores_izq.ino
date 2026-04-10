@@ -21,7 +21,7 @@ const int   CPR_OUTPUT      = PULSES_PER_REV * 4 * GEAR_RATIO; // 3600
 const unsigned long SAMPLE_MS = 100;
 const unsigned long DIR_CHANGE_HOLD_MS = 120;
 
-const float WHEEL_DIAM_M = 0.062f;
+const float WHEEL_DIAM_M = 0.17f;
 const float WHEEL_CIRC_M = 3.14159265f * WHEEL_DIAM_M;
 
 float Kp[3] = {0.0, 0.0, 0.0};
@@ -91,7 +91,7 @@ float computePID(PIDState &m, float dt, float Kp, float Ki, float Kd, float inte
   // Alinear la velocidad medida con la dirección comandada:
   // D1 -> usa RPM tal cual
   // D0 -> invierte el signo para que "reversa correcta" se vea positiva
-  float rpmAligned = m.direction ? m.currentRPM : -m.currentRPM;
+  float rpmAligned = m.direction ? -m.currentRPM : m.currentRPM;
 
   m.error = m.setpointRPM - rpmAligned;
 
