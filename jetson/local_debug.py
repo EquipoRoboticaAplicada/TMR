@@ -91,7 +91,7 @@ def run_debug(zed: ZEDShared, vision: VisionZED, odo=None, cmd=None):
             ]):
                 cv.putText(frame, line, (10, 50 + i*22), FONT, 0.55, COLOR_HUD, 1)
 
-        cv.imshow("DEBUG ZED", frame)
+        # cv.imshow("DEBUG ZED", frame)
 
         key = cv.waitKey(1) & 0xFF
         if key in (27, ord('q')):

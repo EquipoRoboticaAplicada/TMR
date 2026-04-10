@@ -24,9 +24,9 @@ const unsigned long DIR_CHANGE_HOLD_MS = 120;
 const float WHEEL_DIAM_M = 0.062f;
 const float WHEEL_CIRC_M = 3.14159265f * WHEEL_DIAM_M;
 
-float Kp[3] = {0.0, 0.0, 0.0};
-float Ki[3] = {1.0, 1.0, 1.0};
-float Kd[3] = {0.0, 0.0, 0.0};
+float Kp[3] = {1.0, 0.0, 0.0};
+float Ki[3] = {0.0, 1.0, 1.0};
+float Kd[3] = {0.0001, 0.0, 0.0};
 const float INTEGRAL_MAX = 200.0;
 
 const unsigned long CMD_TIMEOUT_MS = 400;
@@ -180,6 +180,48 @@ void handleLine(String line) {
     lastCmdMs = millis();
     return;
   }
+
+  // ---- Comandos PID ----
+  // Formato:  KP<i>:<val>  |  KI<i>:<val>  |  KD<i>:<val>
+  //   i = 0, 1, 2  → motor específico
+  //   i = A        → aplica a los 3 motores
+  // Ejemplos:  KP0:1.5   KIA:0.1   KD2:0.05
+  // PID?  → imprime valores actuales
+
+  if (line.length() >= 5 &&
+      (line.startsWith("KP") || line.startsWith("KI") || line.startsWith("KD"))) {
+
+    char gain   = line[1];          // 'P', 'I' o 'D'
+    char target = line[2];          // '0', '1', '2' o 'A'
+    int  colonIdx = line.indexOf(':');
+
+    if (colonIdx != 3) {
+      return;
+    }
+
+    float val = line.substring(colonIdx + 1).toFloat();
+
+    int mStart = 0, mEnd = 3;
+    if (target >= '0' && target <= '2') {
+      mStart = target - '0';
+      mEnd   = mStart + 1;
+    } else if (target != 'A') {
+      return;
+    }
+
+    for (int i = mStart; i < mEnd; i++) {
+      if      (gain == 'P') Kp[i] = val;
+      else if (gain == 'I') Ki[i] = val;
+      else if (gain == 'D') Kd[i] = val;
+
+      // Reiniciar integrador al cambiar ganancias
+      motor[i].errorSum  = 0.0f;
+      motor[i].errorPrev = 0.0f;
+    }
+
+    return;
+  }
+
 }
 
 void readSerialLines() {
@@ -235,12 +277,12 @@ void loop() {
   readSerialLines();
 
     // Failsafe
-    if (millis() - lastCmdMs > CMD_TIMEOUT_MS) {
-      for (int i = 0; i < 3; i++) {
-        motor[i].setpointRPM = 0.0f;
-      motor[i].errorSum    = 0.0f;
-      }
-    }
+//    if (millis() - lastCmdMs > CMD_TIMEOUT_MS) {
+//      for (int i = 0; i < 3; i++) {
+//        motor[i].setpointRPM = 0.0f;
+//      motor[i].errorSum    = 0.0f;
+//      }
+//    }
 
   unsigned long now = millis();
   if (now - lastSampleTime >= SAMPLE_MS) {
@@ -273,26 +315,32 @@ void loop() {
     }
     
       // Paquete UART: ID, seq, rpm0, v0, rpm1, v1, rpm2, v2
-      Serial.print(ESP_ID); Serial.print(",");
-      Serial.print(seq++);
-
-      for (int i = 0; i < 3; i++) {
-        Serial.print(",");
-        Serial.print(motor[i].currentRPM, 2);
-        Serial.print(",");
-        Serial.print(v_mps[i], 4);
-      }
-      Serial.println();
+//      Serial.print(ESP_ID); Serial.print(",");
+//      Serial.print(seq++);
+//
+//      for (int i = 0; i < 3; i++) {
+//        Serial.print(",");
+//        Serial.print(motor[i].currentRPM, 2);
+//        Serial.print(",");
+//        Serial.print(v_mps[i], 4);
+//      }
+//      Serial.println();
 
       // Diagnóstico
-//      for(int i = 0; i < 0; i++)
+//      for(int i = 0; i < 3; i++)
 //      {
 //        Serial.print(" SP:"); Serial.print(motor[i].setpointRPM);
 //        Serial.print(" PV:"); Serial.print(motor[i].currentRPM);
 //        Serial.print(" ERR:"); Serial.print(motor[i].errorSum);
 //        Serial.print(" PWM:"); Serial.print(motor[i].pwmPercent);
-//        Serial.println();  
 //      }
+//      Serial.println();
+//
+      Serial.print("SP:"); Serial.print(motor[0].setpointRPM);
+      Serial.print(" PV:"); Serial.print(motor[0].currentRPM);
+      Serial.print(" ERR:"); Serial.print(motor[0].errorSum);
+      Serial.print(" PWM:"); Serial.print(motor[0].pwmPercent);
+      Serial.println();  
 
     lastSampleTime = now;
   }
