@@ -91,7 +91,7 @@ float computePID(PIDState &m, float dt, float Kp, float Ki, float Kd, float inte
   // Alinear la velocidad medida con la dirección comandada:
   // D1 -> usa RPM tal cual
   // D0 -> invierte el signo para que "reversa correcta" se vea positiva
-  float rpmAligned = m.direction ? m.currentRPM : -m.currentRPM;
+  float rpmAligned = m.direction ? -m.currentRPM : m.currentRPM;
 
   m.error = m.setpointRPM - rpmAligned;
 
@@ -181,46 +181,46 @@ void handleLine(String line) {
     return;
   }
 
-  // ---- Comandos PID ----
-  // Formato:  KP<i>:<val>  |  KI<i>:<val>  |  KD<i>:<val>
-  //   i = 0, 1, 2  → motor específico
-  //   i = A        → aplica a los 3 motores
-  // Ejemplos:  KP0:1.5   KIA:0.1   KD2:0.05
-  // PID?  → imprime valores actuales
-
-  if (line.length() >= 5 &&
-      (line.startsWith("KP") || line.startsWith("KI") || line.startsWith("KD"))) {
-
-    char gain   = line[1];          // 'P', 'I' o 'D'
-    char target = line[2];          // '0', '1', '2' o 'A'
-    int  colonIdx = line.indexOf(':');
-
-    if (colonIdx != 3) {
-      return;
-    }
-
-    float val = line.substring(colonIdx + 1).toFloat();
-
-    int mStart = 0, mEnd = 3;
-    if (target >= '0' && target <= '2') {
-      mStart = target - '0';
-      mEnd   = mStart + 1;
-    } else if (target != 'A') {
-      return;
-    }
-
-    for (int i = mStart; i < mEnd; i++) {
-      if      (gain == 'P') Kp[i] = val;
-      else if (gain == 'I') Ki[i] = val;
-      else if (gain == 'D') Kd[i] = val;
-
-      // Reiniciar integrador al cambiar ganancias
-      motor[i].errorSum  = 0.0f;
-      motor[i].errorPrev = 0.0f;
-    }
-
-    return;
-  }
+//  // ---- Comandos PID ----
+//  // Formato:  KP<i>:<val>  |  KI<i>:<val>  |  KD<i>:<val>
+//  //   i = 0, 1, 2  → motor específico
+//  //   i = A        → aplica a los 3 motores
+//  // Ejemplos:  KP0:1.5   KIA:0.1   KD2:0.05
+//  // PID?  → imprime valores actuales
+//
+//  if (line.length() >= 5 &&
+//      (line.startsWith("KP") || line.startsWith("KI") || line.startsWith("KD"))) {
+//
+//    char gain   = line[1];          // 'P', 'I' o 'D'
+//    char target = line[2];          // '0', '1', '2' o 'A'
+//    int  colonIdx = line.indexOf(':');
+//
+//    if (colonIdx != 3) {
+//      return;
+//    }
+//
+//    float val = line.substring(colonIdx + 1).toFloat();
+//
+//    int mStart = 0, mEnd = 3;
+//    if (target >= '0' && target <= '2') {
+//      mStart = target - '0';
+//      mEnd   = mStart + 1;
+//    } else if (target != 'A') {
+//      return;
+//    }
+//
+//    for (int i = mStart; i < mEnd; i++) {
+//      if      (gain == 'P') Kp[i] = val;
+//      else if (gain == 'I') Ki[i] = val;
+//      else if (gain == 'D') Kd[i] = val;
+//
+//      // Reiniciar integrador al cambiar ganancias
+//      motor[i].errorSum  = 0.0f;
+//      motor[i].errorPrev = 0.0f;
+//    }
+//
+//    return;
+//  }
 
 }
 
