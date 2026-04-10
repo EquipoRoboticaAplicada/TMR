@@ -47,7 +47,7 @@ def run_debug(zed: ZEDShared, vision: VisionZED, odo=None, cmd=None):
         else:
             result = zed.get_frame_copy()
             if result is None:
-                cv.waitKey(1)
+                # cv.waitKey(1)
                 continue
             frame, _ = result
 
@@ -93,16 +93,16 @@ def run_debug(zed: ZEDShared, vision: VisionZED, odo=None, cmd=None):
 
         # cv.imshow("DEBUG ZED", frame)
 
-        key = cv.waitKey(1) & 0xFF
-        if key in (27, ord('q')):
-            break
-        if key == ord('r') and odo is not None:
-            odo.reset_pose()
-            cmd.reset_path()
+    #     key = cv.waitKey(1) & 0xFF
+    #     if key in (27, ord('q')):
+    #         break
+    #     if key == ord('r') and odo is not None:
+    #         odo.reset_pose()
+    #         cmd.reset_path()
 
 
-    cv.destroyAllWindows()
-    print("[debug] Ventana cerrada.")
+    # cv.destroyAllWindows()
+    # print("[debug] Ventana cerrada.")
 
 
 if __name__ == "__main__":
