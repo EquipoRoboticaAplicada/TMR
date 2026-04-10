@@ -235,12 +235,12 @@ void loop() {
   readSerialLines();
 
     // Failsafe
-//    if (millis() - lastCmdMs > CMD_TIMEOUT_MS) {
-//      for (int i = 0; i < 3; i++) {
-//        motor[i].setpointRPM = 0.0f;
-//      motor[i].errorSum    = 0.0f;
-//      }
-//    }
+    if (millis() - lastCmdMs > CMD_TIMEOUT_MS) {
+      for (int i = 0; i < 3; i++) {
+        motor[i].setpointRPM = 0.0f;
+      motor[i].errorSum    = 0.0f;
+      }
+    }
 
   unsigned long now = millis();
   if (now - lastSampleTime >= SAMPLE_MS) {
@@ -273,26 +273,26 @@ void loop() {
     }
     
       // Paquete UART: ID, seq, rpm0, v0, rpm1, v1, rpm2, v2
-//      Serial.print(ESP_ID); Serial.print(",");
-//      Serial.print(seq++);
-//
-//      for (int i = 0; i < 3; i++) {
-//        Serial.print(",");
-//        Serial.print(motor[i].currentRPM, 2);
-//        Serial.print(",");
-//        Serial.print(v_mps[i], 4);
-//      }
-//      Serial.println();
+      Serial.print(ESP_ID); Serial.print(",");
+      Serial.print(seq++);
+
+      for (int i = 0; i < 3; i++) {
+        Serial.print(",");
+        Serial.print(motor[i].currentRPM, 2);
+        Serial.print(",");
+        Serial.print(v_mps[i], 4);
+      }
+      Serial.println();
 
       // Diagnóstico
-      for(int i = 0; i < 3; i++)
-      {
-        Serial.print(" SP:"); Serial.print(motor[i].setpointRPM);
-        Serial.print(" PV:"); Serial.print(motor[i].currentRPM);
-        Serial.print(" ERR:"); Serial.print(motor[i].errorSum);
-        Serial.print(" PWM:"); Serial.print(motor[i].pwmPercent);
-      }
-      Serial.println();  
+//      for(int i = 0; i < 3; i++)
+//      {
+//        Serial.print(" SP:"); Serial.print(motor[i].setpointRPM);
+//        Serial.print(" PV:"); Serial.print(motor[i].currentRPM);
+//        Serial.print(" ERR:"); Serial.print(motor[i].errorSum);
+//        Serial.print(" PWM:"); Serial.print(motor[i].pwmPercent);
+//      }
+//      Serial.println();  
 
     lastSampleTime = now;
   }
