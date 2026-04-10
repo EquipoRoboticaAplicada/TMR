@@ -21,8 +21,8 @@ class Route_Command:
         ANGLE_TOLERANCE = 0.1   # rad — error angular antes de avanzar recto
         BASE_RPM        = 30
 
-        FWD  = "D1"
-        BWD  = "D0"
+        FWD  = "D0"
+        BWD  = "D1"
         SRPM = f"S{BASE_RPM}"
         STOP = "S0"
 
