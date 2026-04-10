@@ -91,7 +91,7 @@ float computePID(PIDState &m, float dt, float Kp, float Ki, float Kd, float inte
   // Alinear la velocidad medida con la dirección comandada:
   // D1 -> usa RPM tal cual
   // D0 -> invierte el signo para que "reversa correcta" se vea positiva
-  float rpmAligned = m.direction ? -m.currentRPM : m.currentRPM;
+  float rpmAligned = m.direction ? m.currentRPM : -m.currentRPM;
 
   m.error = m.setpointRPM - rpmAligned;
 
