@@ -4,7 +4,7 @@ import time
 class Route_Command:
 
     def __init__(self, sender, vision_override_event, path=None):
-        self.default_route = [(3,0)]
+        self.default_route = [(3,0), (3,3)]
         self.path = path or self.default_route
         self.sender          = sender
         self.vision_override = vision_override_event
