@@ -35,7 +35,7 @@ class Route_Command:
 
         def turn_right():
             # Rueda izquierda adelante, rueda derecha atrás ===> gira a la derecha
-            self.sender.send_route(FWD, f"S{60}", BWD, SRPM)
+            self.sender.send_route(FWD, SRPM, BWD, SRPM)
 
         def stop():
             self.sender.send_route(FWD, STOP, FWD, STOP)
