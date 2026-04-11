@@ -33,7 +33,7 @@ const unsigned long CMD_TIMEOUT_MS = 3000;
 
 // true  -> imprime para Serial Plotter
 // false -> imprime CSV para integración con Jetson/RPi
-const bool PLOTTER_MODE = false;
+const bool PLOTTER_MODE = true;
 
 // Motor principal para graficar SP/PV/ERR/PWM
 const int PLOT_MOTOR_IDX = 0;
@@ -110,7 +110,7 @@ void IRAM_ATTR encoderISR(void* arg) {
 float calcularRPMFirmada(long dticks, float dt) {
   if (dt <= 0.0f || CPR_OUTPUT == 0) return 0.0f;
   float rpmNatural = (dticks / (float)CPR_OUTPUT) * (60.0f / dt);
-  return -rpmNatural;
+  return rpmNatural;
 }
 
 float calcularVelocidadMPSDesdeRPM(float rpmSigned) {
