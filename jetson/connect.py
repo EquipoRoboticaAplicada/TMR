@@ -3,6 +3,7 @@ import platform
 import serial
 import time
 import copy
+from odo import stop
 
 class ESP: 
 
@@ -214,6 +215,8 @@ class ESP:
                 self._ser_left.close()
             if self._ser_right and self._ser_right.is_open:
                 self._ser_right.close()
+            stop(self._ser_left)
+            stop(self._ser_right)
             self._ser_left = None
             self._ser_right = None
         print("🛑 Conexiones seriales cerradas.\n")
