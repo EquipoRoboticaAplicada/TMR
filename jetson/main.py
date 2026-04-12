@@ -59,10 +59,10 @@ if __name__ == "__main__":
         finally:
             tracker.stop()
             sender_local.stop()
-            vision.stop()
-            zed.stop()
             odo.stop()
             esp.close()
+            vision.stop()
+            zed.stop()
     else:
         # Sin debug: Flask ya corre en su hilo, el proceso vive hasta Ctrl+C
         try:

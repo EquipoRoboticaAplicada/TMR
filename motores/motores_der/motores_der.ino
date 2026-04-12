@@ -24,9 +24,9 @@ const unsigned long DIR_CHANGE_HOLD_MS = 120;
 const float WHEEL_DIAM_M = 0.17f;
 const float WHEEL_CIRC_M = 3.14159265f * WHEEL_DIAM_M;
 
-float Kp[3] = {0.0, 0.0, 0.0};
-float Ki[3] = {1.0, 1.0, 1.0};
-float Kd[3] = {0.0, 0.0, 0.0};
+float Kp[3] = {1.2f, 1.2f, 1.2f};
+float Ki[3] = {0.015f, 0.015f, 0.015f};
+float Kd[3] = {0.25f, 0.25f, 0.25f};
 const float INTEGRAL_MAX = 200.0;
 
 const unsigned long CMD_TIMEOUT_MS = 400;

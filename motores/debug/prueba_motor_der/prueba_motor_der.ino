@@ -28,12 +28,12 @@ const unsigned long DIR_CHANGE_HOLD_MS = 120;
 // ================= MODO TIMEOUT =================
 // true  -> modo normal, timeout activo
 // false -> modo debug, timeout desactivado
-const bool ENABLE_CMD_TIMEOUT = false;
+const bool ENABLE_CMD_TIMEOUT = true;
 const unsigned long CMD_TIMEOUT_MS = 3000;
 
 // true  -> imprime para Serial Plotter
 // false -> imprime CSV para integración con Jetson/RPi
-const bool PLOTTER_MODE = true;
+const bool PLOTTER_MODE = false;
 
 // Motor principal para graficar SP/PV/ERR/PWM
 const int PLOT_MOTOR_IDX = 0;
@@ -42,9 +42,9 @@ const float WHEEL_DIAM_M = 0.17f;
 const float WHEEL_CIRC_M = 3.14159265f * WHEEL_DIAM_M;
 
 // PID
-float Kp[3] = {0.0f, 0.0f, 0.0f};
-float Ki[3] = {1.0f, 1.0f, 1.0f};
-float Kd[3] = {0.0f, 0.0f, 0.0f};
+float Kp[3] = {1.2f, 1.2f, 1.2f};
+float Ki[3] = {0.015f, 0.015f, 0.015f};
+float Kd[3] = {0.25f, 0.25f, 0.25f};
 const float INTEGRAL_MAX = 200.0f;
 
 unsigned long lastCmdMs = 0;
@@ -110,7 +110,7 @@ void IRAM_ATTR encoderISR(void* arg) {
 float calcularRPMFirmada(long dticks, float dt) {
   if (dt <= 0.0f || CPR_OUTPUT == 0) return 0.0f;
   float rpmNatural = (dticks / (float)CPR_OUTPUT) * (60.0f / dt);
-  return rpmNatural;
+  return -rpmNatural;
 }
 
 float calcularVelocidadMPSDesdeRPM(float rpmSigned) {
