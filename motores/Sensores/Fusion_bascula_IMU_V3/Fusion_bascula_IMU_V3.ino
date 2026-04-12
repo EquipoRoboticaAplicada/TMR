@@ -87,7 +87,7 @@ void setup() {
   celda.tare();
 
   lastTime = millis();
-  Serial.println("Presiona ENTER para medir peso");
+  //Serial.println("Presiona ENTER para medir peso");
 }
 
 /* ========================= */
@@ -119,7 +119,7 @@ void loop() {
         } else {
           float peso2   = suma / muestras;
           peso_actual   = (peso1 + peso2) / 2.0;
-          Serial.print("Peso actualizado: ");
+          //Serial.print("Peso actualizado: ");
           Serial.println(peso_actual, 2);
           midiendo = false;
         }
@@ -171,6 +171,7 @@ void loop() {
   String terrain = detectTerrain(pitchF);
 
   /* ===== PRINT SIN BLOQUEAR ===== */
+  Serial.println("Sensores");
   if (millis() - lastPrint >= 100) {
     lastPrint = millis();
     Serial.print(pitchF);    Serial.print(",");
@@ -178,7 +179,7 @@ void loop() {
     Serial.print(velocity);  Serial.print(",");
     Serial.print(terrain);   Serial.print(",");
     Serial.println(peso_actual);
-    
+
   }
   delay(20);
 }
