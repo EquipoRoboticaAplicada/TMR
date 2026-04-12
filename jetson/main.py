@@ -4,7 +4,7 @@ import server
 
 from vision_zed import VisionZED, ZEDShared
 from util import SenderJetson, ImgProcessorJetson
-from command import Route_Command
+from command_PRUEBA_IMU import Route_Command
 from odo import RoverOdometry
 from imu_reader import IMUReader
 from local_debug import run_debug
