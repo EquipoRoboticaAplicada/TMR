@@ -28,12 +28,12 @@ const unsigned long DIR_CHANGE_HOLD_MS = 120;
 // ================= MODO TIMEOUT =================
 // true  -> modo normal, timeout activo
 // false -> modo debug, timeout desactivado
-const bool ENABLE_CMD_TIMEOUT = true;
+const bool ENABLE_CMD_TIMEOUT = false;
 const unsigned long CMD_TIMEOUT_MS = 3000;
 
 // true  -> imprime para Serial Plotter
 // false -> imprime CSV para integración con Jetson/RPi
-const bool PLOTTER_MODE = false;
+const bool PLOTTER_MODE = true;
 
 // Motor principal para graficar SP/PV/ERR/PWM
 const int PLOT_MOTOR_IDX = 0;
@@ -42,9 +42,9 @@ const float WHEEL_DIAM_M = 0.17f;
 const float WHEEL_CIRC_M = 3.14159265f * WHEEL_DIAM_M;
 
 // PID
-float Kp[3] = {1.2f, 1.2f, 1.2f};
-float Ki[3] = {0.015f, 0.015f, 0.015f};
-float Kd[3] = {0.25f, 0.25f, 0.25f};
+float Kp[3] = {1.6f, 1.6f, 1.6f};
+float Ki[3] = {1.8f, 1.8f, 1.8f};
+float Kd[3] = {0.035f, 0.035f, 0.035f};
 const float INTEGRAL_MAX = 200.0f;
 
 unsigned long lastCmdMs = 0;
@@ -127,22 +127,31 @@ float computePID(PIDState &m, float dt, float Kp, float Ki, float Kd, float inte
   // D1 -> controlRPM = currentRPM
   // D0 -> controlRPM = -currentRPM
   // Así el lazo siempre trabaja con magnitudes positivas.
-  m.controlRPM = m.direction ? m.currentRPM : -m.currentRPM;
+  m.controlRPM = fabsf(m.currentRPM);
 
   // Error del lazo
   m.error = m.desiredRPM - m.controlRPM;
 
   float P = Kp * m.error;
-
-  m.errorSum += m.error * dt;
-  m.errorSum = constrain(m.errorSum, -integralMax, integralMax);
-  float I = Ki * m.errorSum;
-
+  
+  // ── calcular D primero para tenerlo disponible ──────────────
   float errorDiff = (m.error - m.errorPrev) / dt;
   float D = Kd * errorDiff;
   m.errorPrev = m.error;
-
-  // La dirección se manda aparte; aquí solo usamos magnitud de PWM
+  
+  // ── I con anti-windup (ahora sí tiene D disponible) ─────────
+  float I_prev    = Ki * m.errorSum;
+  float tentative = P + I_prev + D;
+  
+  bool sat_high = (tentative >= 100.0f) && (m.error > 0.0f);
+  bool sat_low  = (tentative <=   0.0f) && (m.error < 0.0f);
+  
+  if (!sat_high && !sat_low) {
+      m.errorSum += m.error * dt;
+      m.errorSum  = constrain(m.errorSum, -integralMax, integralMax);
+  }
+  float I = Ki * m.errorSum;
+  
   float u = P + I + D;
   if (u < 0.0f) u = 0.0f;
   m.pidOutput = constrain(u, 0.0f, 100.0f);
@@ -265,10 +274,16 @@ void handleLine(String line) {
   }
 
   if (line[0] == 'S') {
-    float sp = constrain(line.substring(1).toFloat(), 0.0f, 67.0f);
-    for (int i = 0; i < 3; i++) motor[i].setpointRPM = sp;
-    lastCmdMs = millis();
-    return;
+      float sp = constrain(line.substring(1).toFloat(), 0.0f, 67.0f);
+      for (int i = 0; i < 3; i++) {
+          motor[i].setpointRPM = sp;
+          if (sp == 0.0f) {
+              motor[i].errorSum  = 0.0f;
+              motor[i].errorPrev = 0.0f;
+              motor[i].pidOutput = 0.0f;
+          }
+      }
+      lastCmdMs = millis();
   }
 
   if (line == "STOP") {
