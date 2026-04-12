@@ -3,7 +3,7 @@ import serial
 import threading
 
 # ===== SERIAL =====
-puerto = 'COM5'
+puerto = '/dev/ttyUSB0'
 ser = serial.Serial(puerto, 115200, timeout=1)
 ser.flushInput()
 
@@ -18,9 +18,9 @@ running = True
 lock = threading.Lock()
 
 # ===== CONSTANTES DE CONTROL =====
-KP = 0.8  # Constante proporcional. Súbela si corrige muy lento, bájala si oscila.
+KP = 0.5  # Constante proporcional. Súbela si corrige muy lento, bájala si oscila.
 MAX_RPM = 80
-MIN_RPM = 15
+MIN_RPM = 20
 
 # ===== CONFIGURACIÓN =====
 GRID_SIZE = 50
