@@ -58,14 +58,13 @@ class ESP:
 
     def _try_connect_port(self, port: str):
         try:
-            s = serial.Serial(port, self.BAUDRATE, timeout=0.1)
-            s.port     = port
-            s.baudrate = self.BAUDRATE
-            s.timeout  = 0.1
-            s.dtr      = False   # evita reset al abrir
-            s.rts      = False
-            s.open()
-
+            s = serial.Serial(
+                port,
+                self.BAUDRATE,
+                timeout  = 0.1,
+                dtr      = False,
+                rts      = False
+            )
             time.sleep(0.1)
             s.reset_input_buffer()
             print(f"Probando {port}...")
