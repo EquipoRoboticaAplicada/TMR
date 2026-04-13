@@ -285,6 +285,9 @@ class ESP:
                 self._ser_left.close()
             if self._ser_right and self._ser_right.is_open:
                 self._ser_right.close()
+            if self._ser_sensores and self._ser_sensores.is_open:
+                self._ser_sensores.close()
             self._ser_left = None
             self._ser_right = None
+            self._ser_sensores = None
         print("🛑 Conexiones seriales cerradas.\n")

@@ -98,7 +98,8 @@ def run_debug(zed: ZEDShared, vision: VisionZED, odo=None, cmd=None):
             break
         if key == ord('r') and odo is not None:
             odo.reset_pose()
-            cmd.reset_path()
+            if cmd is not None:
+                cmd.reset_path()
 
 
     cv.destroyAllWindows()

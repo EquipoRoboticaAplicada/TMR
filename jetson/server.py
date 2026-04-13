@@ -7,6 +7,7 @@ esp: ESP = None
 vision = None
 tracker = None
 odo = None
+cmd = None
 
 def get_local_ip():
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -23,7 +24,7 @@ def init_app(esp_instance: ESP, zed_instance, vision_instance, tracker_instance,
     vision  = vision_instance
     tracker = tracker_instance
     odo     = odo_instance
-    cmd = cmd_instance
+    cmd     = cmd_instance
     init_video_stream(zed_instance)
 
 app = Flask(__name__)

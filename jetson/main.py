@@ -38,6 +38,7 @@ if __name__ == "__main__":
     rvr_cmd = Route_Command(
         sender=sender_local,
         vision_override_event=tracker.vision_override,
+        esp=esp
     )
 
     # 8. Servidor Flask en hilo secundario (OpenCV necesita el hilo principal)
