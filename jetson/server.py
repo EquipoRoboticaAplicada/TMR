@@ -34,6 +34,10 @@ def video_feed():
     return Response(gen_frames(),
                     mimetype="multipart/x-mixed-replace; boundary=frame")
 
+@app.route("/sensors", methods=["GET"])
+def sensors():
+    return jsonify(esp.get_sensor_state())  
+
 @app.route("/telemetry", methods=["GET"])
 def telemetry():
     return jsonify({"rover_state": esp.get_rover_state()})
