@@ -27,6 +27,7 @@ class ESP:
         # Estado del rover (sensores)
         self._sensor_state = {
             "sensores": {"pitch": 0.0, "heading": 0.0, "velocity": 0.0, "terrain_text": None, "peso": 0.0},
+            "last_update": 0.0
         }
 
     def connect(self):

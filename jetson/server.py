@@ -35,7 +35,7 @@ def video_feed():
 
 @app.route("/sensors", methods=["GET"])
 def sensors():
-    return jsonify(esp.get_sensor_state())  
+    return jsonify({"rover_sensors": esp.get_sensor_state()})
 
 @app.route("/telemetry", methods=["GET"])
 def telemetry():

@@ -22,6 +22,7 @@ class Receiver:
         self._base_url      = f"http://{PI_IP}:5000"
         self._pose_url      = f"{self._base_url}/odometry"
         self._reset_url     = f"{self._base_url}/pose/reset"
+        self._sensors_url   = f"{self._base_url}/sensors"
         self._poll_interval = 1.0 / poll_hz
 
         self._lock        = threading.Lock()
@@ -58,15 +59,29 @@ class Receiver:
             try:
                 r = session.get(self._pose_url, timeout=1.0)
                 r.raise_for_status()
-                data = r.json()
+                data_m = r.json()
 
                 with self._lock:
-                    self._x           = _safe_float(data.get("x"),     0.0)
-                    self._y           = _safe_float(data.get("y"),     0.0)
-                    self._theta       = _safe_float(data.get("theta"), 0.0)
-                    self._v           = _safe_float(data.get("v"),     0.0)
-                    self._omega       = _safe_float(data.get("omega"), 0.0)
+                    self._x           = _safe_float(data_m.get("x"),     0.0)
+                    self._y           = _safe_float(data_m.get("y"),     0.0)
+                    self._theta       = _safe_float(data_m.get("theta"), 0.0)
+                    self._v           = _safe_float(data_m.get("v"),     0.0)
+                    self._omega       = _safe_float(data_m.get("omega"), 0.0)
                     self._last_update = time.time()
+
+                s = session.get(self._sensors_url, timeout=1.0)
+                s.raise_for_status()
+                data_s = s.json()
+
+                # formato: "sensores": {"pitch": 0.0, "heading": 0.0, "velocity": 0.0, "terrain_text": None, "peso": 0.0},
+                with self._lock:
+                    self._pitch       = _safe_float(data_s["sensores"].get("pitch"), 0.0)
+                    self._heading     = _safe_float(data_s["sensores"].get("heading"), 0.0)
+                    self._velocity     = _safe_float(data_s["sensores"].get("velocity"), 0.0)
+                    self._terrain_text = data_s["sensores"].get("terrain_text", "NONE")
+                    self._peso         = _safe_float(data_s["sensores"].get("peso"), 0.0)
+                    self._sensor_state["last_update"] = time.time()
+                
                 backoff = 1.0
 
             except requests.exceptions.Timeout:
@@ -104,6 +119,16 @@ class Receiver:
     def velocity(self) -> tuple:
         with self._lock:
             return (self._v, self._omega)
+        
+    @property
+    def pitch(self) -> float:
+        with self._lock:
+            return self._pitch
+
+    @property
+    def heading(self) -> float:
+        with self._lock:
+            return self._heading
 
     @property
     def is_stale(self) -> bool:
