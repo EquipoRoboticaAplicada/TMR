@@ -54,6 +54,7 @@ static uint8_t zeroCount = 0;
 void imuInit() {
   accel.begin();
   mag.begin();
+  Serial.println("Sensores");
 }
 
 void i2cReset() {
@@ -64,6 +65,7 @@ void i2cReset() {
   delay(50);
   imuInit();
   //Serial.println("I2C reiniciado.");
+  Serial.println("Sensores");
 }
 
 /* ========================= */
@@ -90,7 +92,6 @@ void setup() {
   //Serial.println("Presiona ENTER para medir peso");
 }
 
-Serial.println("Sensores del IMU");
 /* ========================= */
 void loop() {
 
@@ -172,7 +173,7 @@ void loop() {
   String terrain = detectTerrain(pitchF);
 
   /* ===== PRINT SIN BLOQUEAR ===== */
-
+  
     if (millis() - lastPrint >= 100) {
     lastPrint = millis();
     Serial.print(pitchF);    Serial.print(",");
