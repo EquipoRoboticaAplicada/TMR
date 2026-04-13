@@ -163,18 +163,18 @@ class Route_Command:
                 self.current_index += 1
                 continue
 
-            if abs(angle_error) > ANGLE_TOLERANCE:
-                if angle_error > 0:
-                    turn_left()
-                else:
-                    turn_right()
-            else:
-                go_forward()
+        #     if abs(angle_error) > ANGLE_TOLERANCE:
+        #         if angle_error > 0:
+        #             turn_left()
+        #         else:
+        #             turn_right()
+        #     else:
+        #         go_forward()
 
-            time.sleep(0.1)
+        #     time.sleep(0.1)
 
-        print("Ruta completada. Deteniendo rover.")
-        stop()
+        # print("Ruta completada. Deteniendo rover.")
+        # stop()
 
 
 # ────────────────────────────────────────────────────────────────────────────
