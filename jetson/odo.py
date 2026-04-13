@@ -89,8 +89,8 @@ class RoverOdometry:
             # SOLUCIÓN: Promedio ponderado. 
             # Damos 80% de confianza al motor central (índice 1) porque no derrapa, 
             # y 10% a los extremos para no descartarlos por completo si el centro pierde tracción.
-            v_l = (m_l[0]["m/s"] * 0.20) + (m_l[1]["m/s"] * 0.10) + (m_l[2]["m/s"] * 0.70)
-            v_r = (m_r[0]["m/s"] * 0.60) + (m_r[1]["m/s"] * 0.15) + (m_r[2]["m/s"] * 0.25)
+            v_l = (m_l[0]["m/s"] * 0.50) + (m_l[1]["m/s"] * 0.10) + (m_l[2]["m/s"] * 0.40)
+            v_r = (m_r[0]["m/s"] * 0.70) + (m_r[1]["m/s"] * 0.15) + (m_r[2]["m/s"] * 0.15)
             # print(f"[RoverOdometry] v_l: {v_l:.3f} m/s, v_r: {v_r:.3f} m/s") # DEBUG
 
             v = (v_l + v_r) / 2.0
