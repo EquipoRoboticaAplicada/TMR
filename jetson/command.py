@@ -26,7 +26,7 @@ class Route_Command:
         # Valor recomendado: 0.80 – 0.90
         #   → la odometría domina el control ciclo a ciclo,
         #     mientras el IMU corrige la deriva acumulada.
-        self.cf_alpha        = 0.0   # peso de la odometría  (1-alpha = peso IMU)
+        self.cf_alpha        = 1.0   # peso de la odometría  (1-alpha = peso IMU)
 
         # Estimación fusionada persistente entre iteraciones del bucle
         self._fused_theta    = None   # se inicializa en la primera lectura
