@@ -26,7 +26,7 @@ class Route_Command:
         # Valor recomendado: 0.80 – 0.90
         #   → la odometría domina el control ciclo a ciclo,
         #     mientras el IMU corrige la deriva acumulada.
-        self.cf_alpha        = 1.0   # peso de la odometría  (1-alpha = peso IMU)
+        self.cf_alpha        = 0.0   # peso de la odometría  (1-alpha = peso IMU)
 
         # Estimación fusionada persistente entre iteraciones del bucle
         self._fused_theta    = None   # se inicializa en la primera lectura
@@ -81,6 +81,9 @@ class Route_Command:
         #       (1 - alpha)  → contribución del IMU
         correction        = self.cf_alpha * odom_delta + (1.0 - self.cf_alpha) * imu_delta
         self._fused_theta = normalize_angle(self._fused_theta + correction)
+
+        print(f"[CF] Odom θ: {odom_theta:.2f} rad, IMU θ: {imu_theta:.2f} rad, "
+              f"Fused θ: {self._fused_theta:.2f} rad")
 
         return self._fused_theta
 
