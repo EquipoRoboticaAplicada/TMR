@@ -82,8 +82,15 @@ class RoverOdometry:
             if dt <= 0:
                 return
             self._last_pose_update = now
-            v_l = sum(m["m/s"] for m in self._state["left_side"]["motors"]) / 3.0
-            v_r = sum(m["m/s"] for m in self._state["right_side"]["motors"]) / 3.0
+
+            m_l = self._state["left_side"]["motors"]
+            m_r = self._state["right_side"]["motors"]
+
+            # SOLUCIÓN: Promedio ponderado. 
+            # Damos 80% de confianza al motor central (índice 1) porque no derrapa, 
+            # y 10% a los extremos para no descartarlos por completo si el centro pierde tracción.
+            v_l = (m_l[0]["m/s"] * 0.30) + (m_l[1]["m/s"] * 0.10) + (m_l[2]["m/s"] * 0.60)
+            v_r = (m_r[0]["m/s"] * 0.30) + (m_r[1]["m/s"] * 0.10) + (m_r[2]["m/s"] * 0.60)
             # print(f"[RoverOdometry] v_l: {v_l:.3f} m/s, v_r: {v_r:.3f} m/s") # DEBUG
 
             v = (v_l + v_r) / 2.0

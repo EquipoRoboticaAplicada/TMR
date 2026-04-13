@@ -13,7 +13,7 @@ class Route_Command:
         self.imu_reader      = esp
         self.current_index   = 0
 
-        self.heading_offset  = 1
+        self.heading_offset  = None
 
         # ── Filtro Complementario ────────────────────────────────────────────
         # alpha controla cuánto peso tiene cada fuente en la fusión:
@@ -26,7 +26,7 @@ class Route_Command:
         # Valor recomendado: 0.80 – 0.90
         #   → la odometría domina el control ciclo a ciclo,
         #     mientras el IMU corrige la deriva acumulada.
-        self.cf_alpha        = 0.0   # peso de la odometría  (1-alpha = peso IMU)
+        self.cf_alpha        = 1   # peso de la odometría  (1-alpha = peso IMU)
 
         # Estimación fusionada persistente entre iteraciones del bucle
         self._fused_theta    = None   # se inicializa en la primera lectura
@@ -163,18 +163,18 @@ class Route_Command:
                 self.current_index += 1
                 continue
 
-        #     if abs(angle_error) > ANGLE_TOLERANCE:
-        #         if angle_error > 0:
-        #             turn_left()
-        #         else:
-        #             turn_right()
-        #     else:
-        #         go_forward()
+            if abs(angle_error) > ANGLE_TOLERANCE:
+                if angle_error > 0:
+                    turn_left()
+                else:
+                    turn_right()
+            else:
+                go_forward()
 
-        #     time.sleep(0.1)
+            time.sleep(0.1)
 
-        # print("Ruta completada. Deteniendo rover.")
-        # stop()
+        print("Ruta completada. Deteniendo rover.")
+        stop()
 
 
 # ────────────────────────────────────────────────────────────────────────────
