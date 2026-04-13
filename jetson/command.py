@@ -25,7 +25,7 @@ class Route_Command:
         ANGLE_TOLERANCE = 0.1/2   #  Zona muerta donde va derecho
         BASE_RPM        = 40
         
-        ALPHA_IMU       = 0.8 
+        ALPHA_IMU       = 0.15 
         
         # Constante Proporcional (Kp) - Ajusta este valor si gira muy lento o muy agresivo
         KP = 35.0  
