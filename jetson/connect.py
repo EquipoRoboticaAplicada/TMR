@@ -61,9 +61,9 @@ class ESP:
             s = serial.Serial(
                 port,
                 self.BAUDRATE,
-                timeout  = 0.1,
-                dtr      = False,
-                rts      = False
+                timeout  = 0.5,
+                rtscts   = False,
+                dsrdtr   = False,
             )
             time.sleep(0.1)
             s.reset_input_buffer()
