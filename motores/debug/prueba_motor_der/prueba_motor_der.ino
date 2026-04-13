@@ -42,9 +42,10 @@ const float WHEEL_DIAM_M = 0.17f;
 const float WHEEL_CIRC_M = 3.14159265f * WHEEL_DIAM_M;
 
 // PID
-float Kp[3] = {1.6f, 1.6f, 1.6f};
-float Ki[3] = {1.8f, 1.8f, 1.8f};
-float Kd[3] = {0.035f, 0.035f, 0.035f};
+float Kp[3] = {1.0f, 1.0f, 1.0f};
+float Ki[3] = {1.4f, 1.4f, 1.4f};
+float Kd[3] = {0.0f, 0.0f, 0.0f};
+
 const float INTEGRAL_MAX = 200.0f;
 
 unsigned long lastCmdMs = 0;
