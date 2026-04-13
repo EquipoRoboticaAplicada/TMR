@@ -35,14 +35,14 @@ const unsigned long CMD_TIMEOUT_MS = 3000;
 // false -> imprime CSV para integración con Jetson/RPi
 const bool PLOTTER_MODE = false;
 
-// Motor principal para graficar SP/PV/ERR/PWM
+// Motor principal para graficar SP/PV/ERR/PWM  
 const int PLOT_MOTOR_IDX = 0;
 
 const float WHEEL_DIAM_M = 0.17f;
 const float WHEEL_CIRC_M = 3.14159265f * WHEEL_DIAM_M;
 
 // PID
-float Kp[3] = {0.0f, 0.0f, 0.0f};
+float Kp[3] = {1.2f, 1.2f, 1.0f};
 float Ki[3] = {1.0f, 1.0f, 1.0f};
 float Kd[3] = {0.0f, 0.0f, 0.0f};
 
