@@ -54,7 +54,6 @@ static uint8_t zeroCount = 0;
 void imuInit() {
   accel.begin();
   mag.begin();
-  Serial.println("Sensores");
 }
 
 void i2cReset() {
@@ -65,7 +64,7 @@ void i2cReset() {
   delay(50);
   imuInit();
   //Serial.println("I2C reiniciado.");
-  Serial.println("Sensores");
+  
 }
 
 /* ========================= */
@@ -74,6 +73,7 @@ String detectTerrain(float pitch) {
   else if (pitch < -15) return "DOWN";
   else                  return "FLAT";
 }
+
 
 /* ========================= */
 void setup() {
@@ -90,6 +90,7 @@ void setup() {
 
   lastTime = millis();
   //Serial.println("Presiona ENTER para medir peso");
+  Serial.println("Sensores");
 }
 
 /* ========================= */
