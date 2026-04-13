@@ -2,7 +2,6 @@ from flask import Flask, Response, jsonify
 from video_stream import gen_frames, init_video_stream
 from connect import ESP
 import socket
-from command import Route_Command
 
 esp: ESP = None
 vision = None
