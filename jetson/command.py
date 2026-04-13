@@ -40,7 +40,7 @@ class Route_Command:
 
         # Giros sobre su propio eje (ahora solo se usan si el error es gigantesco)
         def turn_left_tank():
-            self.sender.send_route(BWD, SRPM, FWD, f"S{60}")
+            self.sender.send_route(BWD, SRPM, FWD, SRPM)
 
         def turn_right_tank():
             self.sender.send_route(FWD, SRPM, BWD, SRPM)
