@@ -59,9 +59,18 @@ class ESP:
     def _try_connect_port(self, port: str):
         try:
             s = serial.Serial(port, self.BAUDRATE, timeout=0.1)
+            s.port     = port
+            s.baudrate = self.BAUDRATE
+            s.timeout  = 0.1
+            s.dtr      = False   # evita reset al abrir
+            s.rts      = False
+            s.open()
+
+            time.sleep(0.1)
+            s.reset_input_buffer()
             print(f"Probando {port}...")
 
-            deadline = time.time() + 3.0
+            deadline = time.time() + 6.0
             identified = False
 
             while time.time() < deadline:
@@ -100,6 +109,7 @@ class ESP:
                         ).start()
                         identified = True
                         break
+                time.sleep(0.05)
 
             if not identified:
                 print(f"⚠️  No se identificó ESP en {port} (cerrando).\n")
