@@ -16,7 +16,7 @@ class ZEDShared:
     def __init__(self,
                  resolution="VGA",
                  fps=15,
-                 depth_mode="NEURAL",
+                 depth_mode="PERFORMANCE",
                  min_depth=0.2,
                  max_depth=20.0,
                  confidence_threshold=50):
