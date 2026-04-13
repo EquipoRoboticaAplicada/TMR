@@ -90,6 +90,7 @@ void setup() {
   //Serial.println("Presiona ENTER para medir peso");
 }
 
+Serial.println("Sensores del IMU");
 /* ========================= */
 void loop() {
 
@@ -171,8 +172,7 @@ void loop() {
   String terrain = detectTerrain(pitchF);
 
   /* ===== PRINT SIN BLOQUEAR ===== */
-  Serial.println("Sensores");
-  
+
     if (millis() - lastPrint >= 100) {
     lastPrint = millis();
     Serial.print(pitchF);    Serial.print(",");
