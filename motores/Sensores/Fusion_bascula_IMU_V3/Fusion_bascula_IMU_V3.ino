@@ -172,7 +172,8 @@ void loop() {
 
   /* ===== PRINT SIN BLOQUEAR ===== */
   Serial.println("Sensores");
-  if (millis() - lastPrint >= 100) {
+  
+    if (millis() - lastPrint >= 100) {
     lastPrint = millis();
     Serial.print(pitchF);    Serial.print(",");
     Serial.print(heading);   Serial.print(",");
