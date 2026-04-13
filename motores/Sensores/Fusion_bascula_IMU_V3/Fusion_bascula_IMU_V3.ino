@@ -176,7 +176,7 @@ void loop() {
   
     if (millis() - lastPrint >= 100) {
       lastPrint = millis();
-      Serial.println("sensores");   Serial.print(",");
+      Serial.print("sensores");     Serial.print(",");
       Serial.print(pitchF);         Serial.print(",");
       Serial.print(heading);        Serial.print(",");
       Serial.print(velocity);       Serial.print(",");

@@ -83,6 +83,7 @@ class Route_Command:
                 imu_theta_aligned = normalize_angle(imu_theta + self.heading_offset)
                 angle_diff = normalize_angle(imu_theta_aligned - current_theta)
                 fused_theta = normalize_angle(current_theta + (ALPHA_IMU * angle_diff))
+                print(f"IMU Heading: {imu_heading_deg:.2f}°, Odometry Theta: {math.degrees(current_theta):.2f}°, Fused Theta: {math.degrees(fused_theta):.2f}°")
 
             dx       = target_x - current_x
             dy       = target_y - current_y
