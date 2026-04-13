@@ -1,3 +1,4 @@
+from email import header
 import threading
 import platform
 import serial
@@ -11,15 +12,21 @@ class ESP:
     def __init__(self):
         
         # Puertos seriales 
-        self._ser_left  = None # Motores izquierda
-        self._ser_right = None # Motores derecha
-        self._lock      = threading.Lock()
+        self._ser_left      = None # Motores izquierda
+        self._ser_right     = None # Motores derecha
+        self._ser_sensores  = None # Sensores
+        self._lock          = threading.Lock()
 
         # Estado del rover (odometría)
         self._rover_state = {
             "left_side":  {"seq": 0, "motors": [{"rpm": 0.0, "m/s": 0.0} for _ in range(3)]},
             "right_side": {"seq": 0, "motors": [{"rpm": 0.0, "m/s": 0.0} for _ in range(3)]},
             "last_update": 0.0
+        }
+
+        # Estado del rover (sensores)
+        self._sensor_state = {
+            "sensores": {"pitch": 0.0, "heading": 0.0, "velocity": 0.0, "terrain_text": None, "peso": 0.0},
         }
 
     def connect(self):
@@ -83,6 +90,17 @@ class ESP:
                         identified = True
                         break
 
+                    elif line.startswith("sensores") and self._ser_sensores is None:
+                        self._ser_sensores = s
+                        print(f"✅ SENSORES detectados en {port}")
+                        threading.Thread(
+                            target=self._read_serial_thread,
+                            args=(s, "sensores"),
+                            daemon=True
+                        ).start()
+                        identified = True
+                        break
+
             if not identified:
                 print(f"⚠️  No se identificó ESP en {port} (cerrando).\n")
                 s.close()
@@ -105,7 +123,9 @@ class ESP:
                 line = raw.decode("utf-8", errors="ignore").strip()
 
                 if line.startswith("ESP_L") or line.startswith("ESP_R"):
-                    self._parse_esp_line(line)
+                    self._parse_esp_line_m(line)
+                elif line.startswith("sensores"):
+                    self._parse_esp_line_s(line)
 
             except serial.SerialException as e:
                 print(f"Error serial ({side}): {e}")
@@ -121,6 +141,8 @@ class ESP:
                         self._ser_left = None
                     elif side == "right" and self._ser_right is ser_obj:
                         self._ser_right = None
+                    elif side == "sensores" and self._ser_sensores is ser_obj:
+                        self._ser_sensores = None
 
                 break
 
@@ -128,7 +150,48 @@ class ESP:
                 print(f"Error inesperado leyendo serial ({side}): {e}")
                 break
 
-    def _parse_esp_line(self, line: str):
+    def _parse_esp_line_s(self, line: str):
+        """
+        Formato: sensores, pitch, heading, velocity, terrain_text, peso
+        """
+
+        if not line:
+            return
+
+        try:
+            try:
+                data = line.split(",")
+                if len(data) != 5:
+                    return
+        
+                header = data[0]
+
+                p, h, v, t, w = data
+                
+                if header != "sensores":
+                    ValueError(f"Header desconocido: {header}")
+
+            except (ValueError, IndexError):
+                    print("[_parse_esp_line_s] Error.\n")
+                    return
+
+            with self._lock:
+                pitch = float(p)
+                heading = float(h)
+                velocity = float(v)
+                terrain_text = t
+                peso = float(w)
+                
+                self._sensor_state["sensores"].update(
+                    {"pitch": pitch, "heading": heading, "velocity": velocity, "terrain_text": terrain_text, "peso": peso}
+                )
+                self._sensor_state["last_update"] = time.time()
+        except ValueError as e:
+            print(f"[parse] ValueError en: {repr(line)} → {e}")
+        except Exception as e:
+            print(f"[parse] Error inesperado: {repr(line)} → {e}")
+
+    def _parse_esp_line_m(self, line: str):
         """
         Formato: ESP_L/R, seq, rpm0, v0, rpm1, v1, rpm2, v2
         """
@@ -136,7 +199,7 @@ class ESP:
             return
 
         try:
-            # print(line)
+            # print(line) # DEBUG
             parts = line.strip().split(',')
 
             if len(parts) != 8:
@@ -150,8 +213,9 @@ class ESP:
                     {"rpm": float(parts[4]), "m/s": float(parts[5])},
                     {"rpm": float(parts[6]), "m/s": float(parts[7])},
                 ]
+
             except (ValueError, IndexError):
-                print("[_parse_esp_line] Error.\n")
+                print("[_parse_esp_line_m] Error.\n")
                 return
 
             with self._lock:
@@ -182,6 +246,14 @@ class ESP:
         with self._lock:
             # print((self._rover_state)) # DEBUG
             return copy.deepcopy(self._rover_state)
+
+    def get_sensor_state(self) -> dict:
+        """
+        Devuelve una copia segura del sensor_state actual (IMU + sensores).
+        Usar siempre esta función desde IMU.py, nunca acceder a _sensor_state directamente.
+        """
+        with self._lock:
+            return copy.deepcopy(self._sensor_state)
 
     def send_uart(self, left_dir, left_rpm, right_dir, right_rpm):
         for val in (left_dir, left_rpm, right_dir, right_rpm):
