@@ -1,4 +1,3 @@
-from email import header
 import threading
 import platform
 import serial
@@ -162,12 +161,11 @@ class ESP:
         try:
             try:
                 data = line.split(",")
-                if len(data) != 5:
+                if len(data) != 6:   # ← 6, no 5
                     return
-        
                 header = data[0]
+                _, p, h, v, t, w = data   # ← descartar header en el unpack
 
-                p, h, v, t, w = data
                 
                 if header != "sensores":
                     ValueError(f"Header desconocido: {header}")

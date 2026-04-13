@@ -4,12 +4,12 @@ import time
 
 class Route_Command:
 
-    def __init__(self, sender, vision_override_event, path=None, imu_reader=None):
-        self.default_route = [(0,3), (3,3)]
-        self.path = path or self.default_route
+    def __init__(self, sender, vision_override_event, path=None, esp=None):
+        self.default_route   = [(0,3), (3,3)]
+        self.path            = path or self.default_route
         self.sender          = sender
         self.vision_override = vision_override_event
-        self.imu_reader      = imu_reader
+        self.imu_reader             = esp
         self.current_index   = 0
         
         self.heading_offset  = None 
@@ -70,11 +70,11 @@ class Route_Command:
 
             # --- ODOMETRÍA E IMU ---
             current_x, current_y, current_theta = rover_odometry.pose
-
             fused_theta = current_theta
-            
+
             if self.imu_reader is not None:
-                imu_heading_deg = self.imu_reader.get_heading()
+                state = self.imu_reader.get_sensor_state()
+                imu_heading_deg = state.get("sensores", {}).get("heading", 0.0)
                 imu_theta = math.radians(imu_heading_deg) 
                 
                 if self.heading_offset is None:
