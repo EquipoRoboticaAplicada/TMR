@@ -90,7 +90,6 @@ void setup() {
 
   lastTime = millis();
   //Serial.println("Presiona ENTER para medir peso");
-  Serial.println("Sensores");
 }
 
 /* ========================= */
@@ -176,13 +175,13 @@ void loop() {
   /* ===== PRINT SIN BLOQUEAR ===== */
   
     if (millis() - lastPrint >= 100) {
-    lastPrint = millis();
-    Serial.print(pitchF);    Serial.print(",");
-    Serial.print(heading);   Serial.print(",");
-    Serial.print(velocity);  Serial.print(",");
-    Serial.print(terrain);   Serial.print(",");
-    Serial.println(peso_actual);
-
-  }
+      lastPrint = millis();
+      Serial.println("sensores");   Serial.print(",");
+      Serial.print(pitchF);         Serial.print(",");
+      Serial.print(heading);        Serial.print(",");
+      Serial.print(velocity);       Serial.print(",");
+      Serial.print(terrain);        Serial.print(",");
+      Serial.print(peso_actual);    Serial.println();
+    }
   delay(20);
 }
