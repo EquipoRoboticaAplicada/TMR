@@ -18,8 +18,8 @@ class ESP:
 
         # Estado del rover (odometría)
         self._rover_state = {
-            "left_side":  {"seq": 0, "motors": [{"rpm": 0.0, "m/s": 0.0} for _ in range(3)]},
-            "right_side": {"seq": 0, "motors": [{"rpm": 0.0, "m/s": 0.0} for _ in range(3)]},
+            "left_side":  {"seq": 0, "motors": [{"rpm": 0.0, "m/s": 0.0} for _ in range(2)]},
+            "right_side": {"seq": 0, "motors": [{"rpm": 0.0, "m/s": 0.0} for _ in range(2)]},
             "last_update": 0.0
         }
 
@@ -219,7 +219,7 @@ class ESP:
                 m_data = [
                     {"rpm": float(parts[2]), "m/s": float(parts[3])},
                     {"rpm": float(parts[4]), "m/s": float(parts[5])},
-                    {"rpm": float(parts[6]), "m/s": float(parts[7])},
+                    # {"rpm": float(parts[6]), "m/s": float(parts[7])}, # Solo 2 motores por lado, no 3. Encoders muertos. 
                 ]
 
             except (ValueError, IndexError):

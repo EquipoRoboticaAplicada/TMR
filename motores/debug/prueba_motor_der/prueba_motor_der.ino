@@ -18,7 +18,7 @@ const int ENC_B[3] = {5, 17, 19};
 const int PWM_MAX = (1 << PWM_RESOLUTION) - 1;
 
 const float PWM_MIN        = 20.0f;
-const float GEAR_RATIO     = 56.25f;
+const float GEAR_RATIO     = 270.0f;
 const int   PULSES_PER_REV = 16;
 const int   CPR_OUTPUT     = (int)(PULSES_PER_REV * 4 * GEAR_RATIO); // 3600
 
@@ -28,12 +28,12 @@ const unsigned long DIR_CHANGE_HOLD_MS = 120;
 // ================= MODO TIMEOUT =================
 // true  -> modo normal, timeout activo
 // false -> modo debug, timeout desactivado
-const bool ENABLE_CMD_TIMEOUT = true;
+const bool ENABLE_CMD_TIMEOUT = false;
 const unsigned long CMD_TIMEOUT_MS = 3000;
 
 // true  -> imprime para Serial Plotter
 // false -> imprime CSV para integración con Jetson/RPi
-const bool PLOTTER_MODE = false;
+const bool PLOTTER_MODE = true;
 
 // Motor principal para graficar SP/PV/ERR/PWM
 const int PLOT_MOTOR_IDX = 0;
@@ -42,8 +42,8 @@ const float WHEEL_DIAM_M = 0.17f;
 const float WHEEL_CIRC_M = 3.14159265f * WHEEL_DIAM_M;
 
 // PID
-float Kp[3] = {0.1f, 0.1f, 0.1f};
-float Ki[3] = {1.2f, 1.2f, 1.2f};
+float Kp[3] = {0.2f, 0.2f, 0.2f}; 
+float Ki[3] = {1.0f, 1.0f, 1.0f};
 float Kd[3] = {0.0f, 0.0f, 0.0f};
 
 const float INTEGRAL_MAX = 200.0f;
@@ -232,7 +232,7 @@ void imprimirCSV(float v_mps[3]) {
   Serial.print(",");
   Serial.print(seq++);
 
-  for (int i = 0; i < 3; i++) {
+  for (int i = 0; i < 2; i++) { // dos motores funcionando, los dos de enfrente 
     Serial.print(",");
     Serial.print(motor[i].currentRPM, 2);
     Serial.print(",");
@@ -416,14 +416,16 @@ void loop() {
     for (int i = 0; i < 3; i++) {
       motor[i].currentRPM = calcularRPMFirmada(dticks[i], dt);
 
-      if (now < motor[i].inhibitUntilMs) {
+      if (now < motor[i].inhibitUntilMs) 
         motor[i].pwmPercent = 0.0f;
-        setMotorPins(IN1[i], IN2[i], 0.0f, motor[i].direction);
-      } else {
+      else 
         motor[i].pwmPercent = computePID(motor[i], dt, Kp[i], Ki[i], Kd[i], INTEGRAL_MAX);
-        setMotorPins(IN1[i], IN2[i], motor[i].pwmPercent, motor[i].direction);
-      }
 
+      if (i == 2)
+        setMotorPins(IN1[2], IN2[2], motor[1].pwmPercent, motor[1].direction); // Encoder de motor 2 no funcional
+      else 
+        setMotorPins(IN1[i], IN2[i], motor[i].pwmPercent, motor[i].direction);
+        
       v_mps[i] = calcularVelocidadMPSDesdeRPM(motor[i].currentRPM);
     }
 
