@@ -5,7 +5,7 @@ from PyQt5.QtGui import QPainter, QColor, QPen, QPolygonF, QLinearGradient
 from PyQt5.QtCore import Qt, QTimer, QPointF
 
 # Importamos diseño con pestañas
-import qt_HMI_DISEÑO
+import qt_HMI_DISENO
 
 # Importamos el Receiver 
 from receiver import Receiver
@@ -166,7 +166,7 @@ class MapaTopograficoWidget(QOpenGLWidget):
 class MiRoverGUI(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.ui = qt_HMI_DISEÑO.Ui_MainWindow()
+        self.ui = qt_HMI_DISENO.Ui_MainWindow()
         self.ui.setupUi(self)
 
         # 1. Configurar Mapa de Trayectoria (Pestaña 1)
