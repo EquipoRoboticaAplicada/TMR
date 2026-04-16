@@ -288,6 +288,14 @@ class ESP:
                 print(f"[send_uart] Error escribiendo a ESP_R: {e}")
                 self._ser_right = None
 
+    def act_arm(self):
+        try: 
+            with self._lock:
+                if self._ser_sensores and self._ser_sensores.is_open:
+                    self._ser_sensores.write("B0\n".encode())
+        except serial.SerialException as e:
+            print(f"[act_arm] Error escribiendo a ESP_S: {e}")
+
     def close(self):
         with self._lock:
             if self._ser_left and self._ser_left.is_open:
