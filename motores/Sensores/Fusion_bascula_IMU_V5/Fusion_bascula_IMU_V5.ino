@@ -162,7 +162,7 @@ bool manejarComandoSerial() {
     delay(300);
     arm_up();
     delay(500);
-    servoGripper.write(140);    // abrir gripper
+    servoGripper.write(160);    // abrir gripper
     delay(500);
     peso_actual = leerPesoDirecto();  // medir mientras sostiene el objeto
     lastTime = millis();        // resetear dt para no acumular el tiempo del movimiento
@@ -282,7 +282,6 @@ void imprimirDatos(const DatosIMU &datos) {
 
   Serial.print("sensores");        Serial.print(",");
   Serial.print(datos.pitch);       Serial.print(",");
-  Serial.print(datos.headingRaw);  Serial.print(",");
   Serial.print(datos.heading);     Serial.print(",");
   Serial.print(datos.velocity);    Serial.print(",");
   Serial.print(datos.terrain);     Serial.print(",");
@@ -321,11 +320,10 @@ void setup() {
 
   servo1.write(posicionActual);
   servo2.write(180 - posicionActual);
-  servoGripper.write(140);
+  servoGripper.write(160);
   servoBox.write(20);
 
   lastTime = millis();
-  Serial.println("Sensores");  // FIX BUG 5: señal de sistema listo
 }
 
 /* ============================================================

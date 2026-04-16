@@ -29,12 +29,12 @@ const unsigned long DIR_CHANGE_HOLD_MS = 120;
 // ================= MODO TIMEOUT =================
 // true  -> modo normal, timeout activo
 // false -> modo debug, timeout desactivado
-const bool ENABLE_CMD_TIMEOUT = false;
+const bool ENABLE_CMD_TIMEOUT = true;
 const unsigned long CMD_TIMEOUT_MS = 3000;
-
+|
 // true  -> imprime para Serial Plotter
 // false -> imprime CSV para integración con Jetson/RPi
-const bool PLOTTER_MODE = true;
+const bool PLOTTER_MODE = false;
 
 // Motor principal para graficar SP/PV/ERR/PWM
 const int PLOT_MOTOR_IDX = 0;
