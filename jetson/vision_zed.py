@@ -148,7 +148,7 @@ DRAW = {
     "red":   (0, 0, 255)
 }
 
-MIN_AREA = 600
+MIN_AREA = 300
 KERNEL = cv.getStructuringElement(cv.MORPH_ELLIPSE, (5, 5))
 
 

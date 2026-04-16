@@ -55,6 +55,7 @@ static uint8_t zeroCount = 0;
 Servo servo1;
 Servo servo2;
 Servo servoGripper;
+Servo servoBox; 
 int posicionActual = 180;
 
 /* ============================================================
@@ -111,6 +112,12 @@ void arm_up() {
   }
 }
 
+void box_open() {
+  servoBox.write(110); 
+  delay(5000); 
+  servoBox.write(20);
+}
+
 /* ============================================================
    FUNCIÓN: leerPesoDirecto
    Lee la celda sin depender del buffer serial.
@@ -159,6 +166,8 @@ bool manejarComandoSerial() {
     delay(500);
     peso_actual = leerPesoDirecto();  // medir mientras sostiene el objeto
     lastTime = millis();        // resetear dt para no acumular el tiempo del movimiento
+  } else if (input == "BOPEN") {
+    box_open();  
   } else {
     // Cualquier otro comando → leer peso directamente
     peso_actual = leerPesoDirecto();
@@ -303,14 +312,17 @@ void setup() {
   servo1.setPeriodHertz(50);
   servo2.setPeriodHertz(50);
   servoGripper.setPeriodHertz(50);
-
+  servoBox.setPeriodHertz(50);
+  
   servo1.attach(32, 500, 2500);
   servo2.attach(33, 500, 2500);
   servoGripper.attach(14, 500, 2500);
+  servoBox.attach(27, 500, 2500);
 
   servo1.write(posicionActual);
   servo2.write(180 - posicionActual);
   servoGripper.write(140);
+  servoBox.write(20);
 
   lastTime = millis();
   Serial.println("Sensores");  // FIX BUG 5: señal de sistema listo
