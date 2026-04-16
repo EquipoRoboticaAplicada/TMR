@@ -192,6 +192,7 @@ class ESP:
                 self._sensor_state["sensores"].update(
                     {"pitch": pitch, "heading": heading, "velocity": velocity, "terrain_text": terrain_text, "peso": peso}
                 )
+                print(f"[Sensores] Pitch: {pitch:.2f}°, Heading: {heading:.2f}°, Velocidad: {velocity:.2f} m/s, Terreno: {terrain_text}, Peso: {peso:.2f} kg\n") # DEBUG
                 self._sensor_state["last_update"] = time.time()
         except ValueError as e:
             print(f"[parse] ValueError en: {repr(line)} → {e}")
