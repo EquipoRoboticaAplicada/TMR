@@ -4,15 +4,13 @@ import json
 from pathlib import Path
 import threading
 import time
-from collections import deque
-
 import cv2 as cv
 import numpy as np
 import pyzed.sl as sl
 
 color_file = Path(__file__).resolve().parent / "config" / "colors.json"
 
-# ============================ ZED CAMERA ====================================
+#============================ZED CAMERA====================================
 
 class ZEDShared:
     def __init__(self,
@@ -86,7 +84,6 @@ class ZEDShared:
                 else:
                     frame_bgr = img.copy()
 
-                # Se rota la imagen para visualización/procesamiento
                 frame_bgr = cv.rotate(frame_bgr, cv.ROTATE_180)
 
                 with self.lock:
@@ -97,10 +94,6 @@ class ZEDShared:
                 time.sleep(0.001)
 
     def _map_rotated_to_depth_coords(self, x: int, y: int):
-        """
-        Convierte coordenadas del frame rotado 180° a coordenadas
-        correctas del depth map original.
-        """
         x_depth = self.frame_w - 1 - x
         y_depth = self.frame_h - 1 - y
         return x_depth, y_depth
@@ -124,27 +117,20 @@ class ZEDShared:
 
         if err != sl.ERROR_CODE.SUCCESS:
             return None
-
         if isinstance(depth_value, (list, tuple, np.ndarray)):
             if len(depth_value) == 0:
                 return None
             depth_value = depth_value[0]
-
         if depth_value is None:
             return None
         if not np.isfinite(depth_value) or depth_value <= 0:
             return None
-
         return float(depth_value)
 
-    def get_depth_median_neighborhood(self, x: int, y: int, radius: int = 4):
+    def get_depth_median_neighborhood(self, x: int, y: int, radius: int = 2):
         with self.lock:
             if self.frame_w is None or self.frame_h is None:
                 return None
-
-            x = max(0, min(int(x), self.frame_w - 1))
-            y = max(0, min(int(y), self.frame_h - 1))
-
             vals = []
             for yy in range(y - radius, y + radius + 1):
                 for xx in range(x - radius, x + radius + 1):
@@ -155,12 +141,7 @@ class ZEDShared:
                     err, d = self.depth_mat.get_value(x_depth, y_depth)
 
                     if err == sl.ERROR_CODE.SUCCESS and d is not None and np.isfinite(d) and d > 0:
-                        if isinstance(d, (list, tuple, np.ndarray)):
-                            if len(d) == 0:
-                                continue
-                            d = d[0]
                         vals.append(float(d))
-
         return float(np.median(vals)) if vals else None
 
     def stop(self):
@@ -170,7 +151,7 @@ class ZEDShared:
         self.zed.close()
 
 
-# ============================ VISION ====================================
+#============================VISION====================================
 
 DRAW = {
     "green": (0, 255, 0),
@@ -178,7 +159,7 @@ DRAW = {
     "red":   (0, 0, 255)
 }
 
-MIN_AREA = 300
+MIN_AREA = 600
 KERNEL = cv.getStructuringElement(cv.MORPH_ELLIPSE, (5, 5))
 
 
@@ -192,7 +173,7 @@ def load_color_ranges():
 
 
 def process_mask(mask):
-    mask = cv.morphologyEx(mask, cv.MORPH_OPEN, KERNEL, iterations=1)
+    mask = cv.morphologyEx(mask, cv.MORPH_OPEN,  KERNEL, iterations=1)
     mask = cv.morphologyEx(mask, cv.MORPH_CLOSE, KERNEL, iterations=1)
     return mask
 
@@ -214,7 +195,6 @@ def find_and_draw(mask, frame_draw, label, draw=True):
                 cx = int(M["m10"] / M["m00"])
                 cy = int(M["m01"] / M["m00"])
                 detected_centroids.append((label, cx, cy))
-
                 if draw:
                     x, y, w, h = cv.boundingRect(cnt)
                     color_bgr = DRAW.get(label, (255, 255, 255))
@@ -227,27 +207,25 @@ def find_and_draw(mask, frame_draw, label, draw=True):
 
 
 def detect_colors(frame, color_ranges, draw=False):
-    colors = []
+    colors    = []
     centroids = []
-    areas = []
+    areas     = []
 
     blurred = cv.GaussianBlur(frame, (5, 5), 0)
-    hsv = cv.cvtColor(blurred, cv.COLOR_BGR2HSV)
+    hsv     = cv.cvtColor(blurred, cv.COLOR_BGR2HSV)
 
     for color, ranges in color_ranges.items():
         if isinstance(ranges, dict):
             lower = np.array(ranges["lower"], dtype=np.uint8)
             upper = np.array(ranges["upper"], dtype=np.uint8)
-            mask = cv.inRange(hsv, lower, upper)
-
+            mask  = cv.inRange(hsv, lower, upper)
         elif isinstance(ranges, list):
             mask = None
             for r in ranges:
                 lower = np.array(r["lower"], dtype=np.uint8)
                 upper = np.array(r["upper"], dtype=np.uint8)
-                m = cv.inRange(hsv, lower, upper)
-                mask = m if mask is None else cv.bitwise_or(mask, m)
-
+                m     = cv.inRange(hsv, lower, upper)
+                mask  = m if mask is None else cv.bitwise_or(mask, m)
             if mask is None:
                 continue
         else:
@@ -255,7 +233,6 @@ def detect_colors(frame, color_ranges, draw=False):
 
         mask = process_mask(mask)
         found, c_list, a_list = find_and_draw(mask, frame, color, draw)
-
         if found:
             colors.extend([color] * len(c_list))
             centroids.extend(c_list)
@@ -267,31 +244,25 @@ def detect_colors(frame, color_ranges, draw=False):
 def pick_target(centroids, areas, area_min=1500):
     if not centroids or not areas:
         return None
-
     candidates = [(c, a) for c, a in zip(centroids, areas) if a >= area_min]
     if not candidates:
         return None
-
     centroid, area = max(candidates, key=lambda x: x[1])
     return centroid, area
 
 
-# ============================ MIX ZED & VISION ====================================
+#============================MIX ZED & VISION====================================
 
 class VisionZED:
-    def __init__(self, zed_shared, area_min=500, draw_local=False, depth_history_size=5):
-        self.zed = zed_shared
+    def __init__(self, zed_shared, area_min=500, draw_local=False):
+        self.zed         = zed_shared
         self.color_ranges = load_color_ranges()
-        self.area_min = area_min
-        self.draw_local = draw_local
+        self.area_min    = area_min
+        self.draw_local  = draw_local
 
-        self.lock = threading.Lock()
+        self.lock       = threading.Lock()
         self.stop_event = threading.Event()
-        self.thread = None
-
-        # Historial para filtro temporal de profundidad
-        self.depth_history = deque(maxlen=depth_history_size)
-        self.last_label = None
+        self.thread     = None
 
         self.state = {
             "detected":     False,
@@ -304,21 +275,6 @@ class VisionZED:
             "frame_width":  None,
             "frame_height": None
         }
-
-    def _filtered_depth(self, label, raw_depth):
-        """
-        Aplica una mediana temporal de 5 muestras.
-        Si cambia el objeto/color detectado, reinicia el historial.
-        """
-        if raw_depth is None:
-            return None
-
-        if label != self.last_label:
-            self.depth_history.clear()
-            self.last_label = label
-
-        self.depth_history.append(float(raw_depth))
-        return float(np.median(list(self.depth_history)))
 
     def start(self):
         self.thread = threading.Thread(target=self._run, daemon=True)
@@ -357,13 +313,8 @@ class VisionZED:
 
             if target is not None:
                 centroid, area = target
-                label, cx, cy = centroid
-
-                # Radio aumentado a 4 para mayor estabilidad espacial
-                raw_distance_m = self.zed.get_depth_median_neighborhood(cx, cy, radius=4)
-
-                # Filtro temporal con mediana de 5 muestras
-                filtered_distance_m = self._filtered_depth(label, raw_distance_m)
+                label, cx, cy  = centroid
+                distance_m     = self.zed.get_depth_median_neighborhood(cx, cy, radius=2)
 
                 new_state.update({
                     "detected":   True,
@@ -371,11 +322,8 @@ class VisionZED:
                     "cx":         int(cx),
                     "cy":         int(cy),
                     "area":       float(area),
-                    "distance_m": filtered_distance_m,
+                    "distance_m": distance_m,
                 })
-            else:
-                self.depth_history.clear()
-                self.last_label = None
 
             with self.lock:
                 self.state = new_state
