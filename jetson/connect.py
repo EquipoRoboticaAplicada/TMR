@@ -288,6 +288,25 @@ class ESP:
                 print(f"[send_uart] Error escribiendo a ESP_R: {e}")
                 self._ser_right = None
 
+    def wait_for_peso_change(self, timeout: float = 10.0, poll_interval: float = 0.05) -> bool:
+        """
+        Bloquea el hilo llamante hasta que el valor de 'peso' en _sensor_state cambie.
+        Retorna True si detectó un cambio, False si se agotó el timeout.
+        """
+        with self._lock:
+            initial_peso = self._sensor_state["sensores"]["peso"]
+
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            time.sleep(poll_interval)
+            with self._lock:
+                current_peso = self._sensor_state["sensores"]["peso"]
+            if current_peso < initial_peso*0.9 or current_peso > initial_peso*1.1:  
+                return True
+
+        print("[wait_for_peso_change] Timeout: no se detectó cambio en 'peso'.\n")
+        return False
+
     def act_arm(self):
         try: 
             with self._lock:
