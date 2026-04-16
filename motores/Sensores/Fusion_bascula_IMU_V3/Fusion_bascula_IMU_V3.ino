@@ -135,9 +135,9 @@ void setup() {
   servo2.setPeriodHertz(50);
   servoGripper.setPeriodHertz(50);
 
-  servo1.attach(10, 500, 2500); 
-  servo2.attach(9, 500, 2500);  
-  servoGripper.attach(13, 500, 2500); 
+  servo1.attach(32, 500, 2500); 
+  servo2.attach(33, 500, 2500);  
+  servoGripper.attach(14, 500, 2500); 
 
   // Posición inicial
   servo1.write(posicionActual);
@@ -157,13 +157,10 @@ void loop() {
 
     if (input == "B0") {
       arm_down();
-      delay(500); // Pequeña pausa para asegurar que el movimiento se complete
-      // Después de que ambos servos llegan a 0°, se cierra el gripper
+      delay(500); 
       servoGripper.write(175);
       arm_up();
       
-      // Actualizar lastTime para evitar picos de velocidad de la IMU 
-      // generados por el tiempo pausado durante la instrucción delay(15)
       lastTime = millis();
 
     } else {
