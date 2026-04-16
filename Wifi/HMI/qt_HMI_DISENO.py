@@ -10,6 +10,7 @@
 
 from PyQt5 import QtCore, QtGui, QtWidgets
 
+
 class Ui_MainWindow(object):
     def setupUi(self, MainWindow):
         MainWindow.setObjectName("MainWindow")
@@ -87,6 +88,20 @@ class Ui_MainWindow(object):
         font.setPointSize(13)
         item.setFont(font)
         self.tableWidget_3.setHorizontalHeaderItem(0, item)
+        self.lineEdit = QtWidgets.QLineEdit(self.tab_3)
+        self.lineEdit.setGeometry(QtCore.QRect(80, 270, 231, 31))
+        self.lineEdit.setText("")
+        self.lineEdit.setObjectName("lineEdit")
+        self.textEdit_3 = QtWidgets.QTextEdit(self.tab_3)
+        self.textEdit_3.setGeometry(QtCore.QRect(70, 240, 251, 21))
+        self.textEdit_3.setObjectName("textEdit_3")
+        self.lineEdit_2 = QtWidgets.QLineEdit(self.tab_3)
+        self.lineEdit_2.setGeometry(QtCore.QRect(370, 270, 231, 31))
+        self.lineEdit_2.setText("")
+        self.lineEdit_2.setObjectName("lineEdit_2")
+        self.textEdit_5 = QtWidgets.QTextEdit(self.tab_3)
+        self.textEdit_5.setGeometry(QtCore.QRect(360, 240, 251, 21))
+        self.textEdit_5.setObjectName("textEdit_5")
         self.tabWidget.addTab(self.tab_3, "")
         MainWindow.setCentralWidget(self.centralwidget)
         self.menubar = QtWidgets.QMenuBar(MainWindow)
@@ -98,7 +113,7 @@ class Ui_MainWindow(object):
         MainWindow.setStatusBar(self.statusbar)
 
         self.retranslateUi(MainWindow)
-        self.tabWidget.setCurrentIndex(0)
+        self.tabWidget.setCurrentIndex(2)
         QtCore.QMetaObject.connectSlotsByName(MainWindow)
 
     def retranslateUi(self, MainWindow):
@@ -140,4 +155,14 @@ class Ui_MainWindow(object):
         item.setText(_translate("MainWindow", "Tamaño"))
         item = self.tableWidget_3.horizontalHeaderItem(0)
         item.setText(_translate("MainWindow", "Piedras"))
+        self.textEdit_3.setHtml(_translate("MainWindow", "<!DOCTYPE HTML PUBLIC \"-//W3C//DTD HTML 4.0//EN\" \"http://www.w3.org/TR/REC-html40/strict.dtd\">\n"
+"<html><head><meta name=\"qrichtext\" content=\"1\" /><style type=\"text/css\">\n"
+"p, li { white-space: pre-wrap; }\n"
+"</style></head><body style=\" font-family:\'MS Shell Dlg 2\'; font-size:8.25pt; font-weight:400; font-style:normal;\">\n"
+"<p align=\"center\" style=\" margin-top:0px; margin-bottom:0px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px;\"><span style=\" font-size:14pt;\">Accion del Brazo</span></p></body></html>"))
+        self.textEdit_5.setHtml(_translate("MainWindow", "<!DOCTYPE HTML PUBLIC \"-//W3C//DTD HTML 4.0//EN\" \"http://www.w3.org/TR/REC-html40/strict.dtd\">\n"
+"<html><head><meta name=\"qrichtext\" content=\"1\" /><style type=\"text/css\">\n"
+"p, li { white-space: pre-wrap; }\n"
+"</style></head><body style=\" font-family:\'MS Shell Dlg 2\'; font-size:8.25pt; font-weight:400; font-style:normal;\">\n"
+"<p align=\"center\" style=\" margin-top:0px; margin-bottom:0px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px;\"><span style=\" font-size:14pt;\">START/STOP</span></p></body></html>"))
         self.tabWidget.setTabText(self.tabWidget.indexOf(self.tab_3), _translate("MainWindow", "Datos"))
