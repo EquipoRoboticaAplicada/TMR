@@ -33,6 +33,13 @@ class Receiver:
         self._omega       = 0.0
         self._last_update = 0.0
 
+        self._pitch = 0.0
+        self._heading = 0.0
+        self._velocity = 0.0
+        self._terrain_text = "NONE"
+        self._peso = 0.0
+        self._sensor_state = {"last_update": 0.0}
+
         self._stop_event  = threading.Event()
         self._thread      = threading.Thread(target=self._run, daemon=True)
 
