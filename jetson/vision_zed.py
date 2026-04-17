@@ -84,7 +84,7 @@ class ZEDShared:
                 else:
                     frame_bgr = img.copy()
 
-                frame_bgr=cv.rotate(frame_bgr,cv.ROTATE_180)
+                frame_bgr = cv.rotate(frame_bgr, cv.ROTATE_180)
 
                 with self.lock:
                     self.last_frame_bgr = frame_bgr
@@ -92,6 +92,11 @@ class ZEDShared:
                     self.last_timestamp = time.time()
             else:
                 time.sleep(0.001)
+
+    def _map_rotated_to_depth_coords(self, x: int, y: int):
+        x_depth = self.frame_w - 1 - x
+        y_depth = self.frame_h - 1 - y
+        return x_depth, y_depth
 
     def get_frame_copy(self):
         with self.lock:
@@ -103,9 +108,12 @@ class ZEDShared:
         with self.lock:
             if self.frame_w is None or self.frame_h is None:
                 return None
+
             x = max(0, min(int(x), self.frame_w - 1))
             y = max(0, min(int(y), self.frame_h - 1))
-            err, depth_value = self.depth_mat.get_value(x, y)
+
+            x_depth, y_depth = self._map_rotated_to_depth_coords(x, y)
+            err, depth_value = self.depth_mat.get_value(x_depth, y_depth)
 
         if err != sl.ERROR_CODE.SUCCESS:
             return None
@@ -128,7 +136,10 @@ class ZEDShared:
                 for xx in range(x - radius, x + radius + 1):
                     cx = max(0, min(int(xx), self.frame_w - 1))
                     cy = max(0, min(int(yy), self.frame_h - 1))
-                    err, d = self.depth_mat.get_value(cx, cy)
+
+                    x_depth, y_depth = self._map_rotated_to_depth_coords(cx, cy)
+                    err, d = self.depth_mat.get_value(x_depth, y_depth)
+
                     if err == sl.ERROR_CODE.SUCCESS and d is not None and np.isfinite(d) and d > 0:
                         vals.append(float(d))
         return float(np.median(vals)) if vals else None
@@ -247,7 +258,7 @@ class VisionZED:
         self.zed         = zed_shared
         self.color_ranges = load_color_ranges()
         self.area_min    = area_min
-        self.draw_local  = draw_local   # solo controla si detect_colors dibuja en el frame
+        self.draw_local  = draw_local
 
         self.lock       = threading.Lock()
         self.stop_event = threading.Event()
@@ -280,8 +291,6 @@ class VisionZED:
             frame, ts = result
             h, w = frame.shape[:2]
 
-            # draw_local=True  → copia el frame para que detect_colors dibuje encima
-            # draw_local=False → usa el frame directo (sin copia), solo lectura HSV
             draw_frame = frame.copy() if self.draw_local else frame
 
             colors, centroids, areas = detect_colors(

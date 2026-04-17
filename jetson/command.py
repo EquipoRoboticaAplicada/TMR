@@ -26,7 +26,7 @@ class Route_Command:
         # Valor recomendado: 0.80 – 0.90
         #   → la odometría domina el control ciclo a ciclo,
         #     mientras el IMU corrige la deriva acumulada.
-        self.cf_alpha        = 0.3   # peso de la odometría  (1-alpha = peso IMU)
+        self.cf_alpha        = 0.8   # peso de la odometría  (1-alpha = peso IMU)
 
         # Estimación fusionada persistente entre iteraciones del bucle
         self._fused_theta    = None   # se inicializa en la primera lectura
@@ -82,8 +82,8 @@ class Route_Command:
         correction        = self.cf_alpha * odom_delta + (1.0 - self.cf_alpha) * imu_delta
         self._fused_theta = normalize_angle(self._fused_theta + correction)
 
-        print(f"[CF] Odom θ: {math.degrees(odom_theta):.2f}° rad, IMU θ: {math.degrees(imu_theta):.2f}° rad, "
-              f"Fused θ: {math.degrees(self._fused_theta):.2f}° rad")
+        # print(f"[CF] Odom θ: {math.degrees(odom_theta):.2f}° rad, IMU θ: {math.degrees(imu_theta):.2f}° rad, "
+        #       f"Fused θ: {math.degrees(self._fused_theta):.2f}° rad")
 
         return self._fused_theta
 
@@ -91,7 +91,7 @@ class Route_Command:
     def follow_path(self, rover_odometry):
         DIST_TOLERANCE  = 0.2   # m   — distancia para considerar que se llegó al punto
         ANGLE_TOLERANCE = 0.1   # rad — error angular antes de avanzar recto
-        BASE_RPM        = 45
+        BASE_RPM        = 20
 
         FWD  = "D1"
         BWD  = "D0"

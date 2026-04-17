@@ -5,6 +5,8 @@ import os
 import time
 import tempfile
 
+from vision_zed import ZEDShared
+
 # ---------------- CONFIG ----------------
 BOX_SIZE = 80
 
@@ -13,14 +15,20 @@ TOL_S = 40
 TOL_V = 40
 
 COLORS = ["red", "blue", "green"]
-WINDOW_NAME = "Color_Calibration"
-
-CAM_INDEX = 0
+WINDOW_NAME = "Color_Calibration_ZED"
 
 N_SAMPLES = 15          # frames por captura
 SAMPLE_DELAY = 0.01     # pausa pequeña entre frames (s)
 
 MOVE_STEP = 10          # pixeles por tecla
+
+# Configuración de la ZED
+ZED_RESOLUTION = "VGA"          # "VGA" o "HD720"
+ZED_FPS = 15
+ZED_DEPTH_MODE = "PERFORMANCE"
+ZED_MIN_DEPTH = 0.2
+ZED_MAX_DEPTH = 20.0
+ZED_CONFIDENCE = 50
 # ---------------------------------------
 
 
@@ -41,13 +49,11 @@ def hsv_bounds_with_wrap(h, s, v, tol_h, tol_s, tol_v):
     h_up  = int(h + tol_h)
 
     if h_low < 0:
-        # [0, h_up] y [179 + h_low, 179]
         return [
             {"lower": [0, s_low, v_low], "upper": [int(h_up), s_up, v_up]},
             {"lower": [int(179 + h_low), s_low, v_low], "upper": [179, s_up, v_up]},
         ]
     elif h_up > 179:
-        # [0, h_up-179] y [h_low, 179]
         return [
             {"lower": [0, s_low, v_low], "upper": [int(h_up - 179), s_up, v_up]},
             {"lower": [int(h_low), s_low, v_low], "upper": [179, s_up, v_up]},
@@ -59,31 +65,57 @@ def hsv_bounds_with_wrap(h, s, v, tol_h, tol_s, tol_v):
 
 
 def atomic_json_dump(obj, final_path):
-    """Escritura atómica: evita JSON incompleto si alguien lo lee a la mitad."""
+    """Escritura atómica para evitar JSON incompleto."""
     os.makedirs(os.path.dirname(final_path), exist_ok=True)
-    fd, tmp_path = tempfile.mkstemp(dir=os.path.dirname(final_path), prefix="colors_", suffix=".tmp")
+    fd, tmp_path = tempfile.mkstemp(
+        dir=os.path.dirname(final_path),
+        prefix="colors_",
+        suffix=".tmp"
+    )
     try:
-        with os.fdopen(fd, "w") as f:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
             json.dump(obj, f, indent=4)
         os.replace(tmp_path, final_path)
     finally:
         if os.path.exists(tmp_path):
             try:
                 os.remove(tmp_path)
-            except:
+            except Exception:
                 pass
 
 
-def capture_pixels(cap, cx, cy, half, n_samples, sample_delay):
-    """Captura N frames del ROI y devuelve TODOS los pixeles HSV (para mediana robusta)."""
+def get_latest_frame(zed, timeout=2.0):
+    """Espera hasta obtener un frame válido de la ZED."""
+    t0 = time.time()
+    while time.time() - t0 < timeout:
+        result = zed.get_frame_copy()
+        if result is not None:
+            frame, ts = result
+            if frame is not None and frame.size > 0:
+                return frame
+        time.sleep(0.01)
+    return None
+
+
+def capture_pixels(zed, cx, cy, half, n_samples, sample_delay):
+    """
+    Captura N frames del ROI desde la ZED y devuelve TODOS los pixeles HSV
+    para usar una mediana robusta.
+    """
     all_pixels = []
 
     for _ in range(n_samples):
-        ret, frame = cap.read()
-        if not ret:
+        frame = get_latest_frame(zed, timeout=1.0)
+        if frame is None:
             continue
 
-        roi = frame[cy - half:cy + half, cx - half:cx + half]
+        h, w = frame.shape[:2]
+        cx2, cy2 = clamp_roi(cx, cy, half, w, h)
+
+        roi = frame[cy2 - half:cy2 + half, cx2 - half:cx2 + half]
+        if roi.size == 0:
+            continue
+
         roi_blur = cv.GaussianBlur(roi, (5, 5), 0)
         hsv = cv.cvtColor(roi_blur, cv.COLOR_BGR2HSV)
 
@@ -100,148 +132,145 @@ def capture_pixels(cap, cx, cy, half, n_samples, sample_delay):
 
 
 def main():
-    cap = cv.VideoCapture(CAM_INDEX)
-    if not cap.isOpened():
-        print("No se pudo abrir la cámara")
-        return
+    zed = None
+    try:
+        zed = ZEDShared(
+            resolution=ZED_RESOLUTION,
+            fps=ZED_FPS,
+            depth_mode=ZED_DEPTH_MODE,
+            min_depth=ZED_MIN_DEPTH,
+            max_depth=ZED_MAX_DEPTH,
+            confidence_threshold=ZED_CONFIDENCE
+        ).start()
 
-    cv.namedWindow(WINDOW_NAME, cv.WINDOW_NORMAL)
+        cv.namedWindow(WINDOW_NAME, cv.WINDOW_NORMAL)
 
-    # Ruta destino
-    base_dir = os.path.dirname(os.path.abspath(__file__))
-    config_dir = os.path.join(base_dir, "config")
-    file_path = os.path.join(config_dir, "colors.json")
+        # Ruta destino
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+        config_dir = os.path.join(base_dir, "config")
+        file_path = os.path.join(config_dir, "colors.json")
 
-    calibrated = {}
-    color_index = 0
+        calibrated = {}
+        color_index = 0
 
-    # Centro inicial del ROI
-    ret, frame = cap.read()
-    if not ret:
-        print("No se pudo leer frame inicial")
-        cap.release()
-        return
-
-    h, w = frame.shape[:2]
-    half = BOX_SIZE // 2
-    cx, cy = w // 2, h // 2
-    cx, cy = clamp_roi(cx, cy, half, w, h)
-
-    # Acumulador de pixeles por color (para múltiples capturas en distintas posiciones)
-    accum_pixels = []
-
-    while color_index < len(COLORS):
-        color_name = COLORS[color_index]
-
-        ret, frame = cap.read()
-        if not ret:
-            continue
+        frame = get_latest_frame(zed, timeout=5.0)
+        if frame is None:
+            print("No se pudo leer frame inicial desde la ZED")
+            return
 
         h, w = frame.shape[:2]
         half = BOX_SIZE // 2
+        cx, cy = w // 2, h // 2
         cx, cy = clamp_roi(cx, cy, half, w, h)
 
-        # Dibujo del ROI
-        cv.rectangle(frame, (cx - half, cy - half), (cx + half, cy + half), (0, 255, 0), 2)
-        cv.putText(
-            frame,
-            f"Color: {color_name} | Capturas acumuladas: {len(accum_pixels)}",
-            (10, 30),
-            cv.FONT_HERSHEY_SIMPLEX,
-            0.8,
-            (255, 255, 255),
-            2
-        )
-        cv.putText(
-            frame,
-            "Flechas/WASD mover | c capturar | n siguiente | r reset | ESC salir",
-            (10, 60),
-            cv.FONT_HERSHEY_SIMPLEX,
-            0.6,
-            (255, 255, 255),
-            2
-        )
+        # Acumulador de pixeles por color
+        accum_pixels = []
 
-        cv.imshow(WINDOW_NAME, frame)
+        while color_index < len(COLORS):
+            color_name = COLORS[color_index]
 
-        key = cv.waitKey(1) & 0xFF
-
-        # Movimiento (WASD)
-        if key == ord("a"):
-            cx -= MOVE_STEP
-        elif key == ord("d"):
-            cx += MOVE_STEP
-        elif key == ord("w"):
-            cy -= MOVE_STEP
-        elif key == ord("s"):
-            cy += MOVE_STEP
-
-        # Flechas (Windows suele reportar 81/82/83/84 o 0/224 + código;
-        # como fallback, también soportamos estos valores comunes)
-        elif key in (81,):   # left
-            cx -= MOVE_STEP
-        elif key in (83,):   # right
-            cx += MOVE_STEP
-        elif key in (82,):   # up
-            cy -= MOVE_STEP
-        elif key in (84,):   # down
-            cy += MOVE_STEP
-
-        # Capturar (acumula)
-        elif key == ord("c"):
-            pixels = capture_pixels(cap, cx, cy, half, N_SAMPLES, SAMPLE_DELAY)
-            if pixels is None:
-                print("No se pudo capturar pixeles (reintenta).")
-            else:
-                accum_pixels.append(pixels)
-                print(f"Captura añadida para {color_name}. Total: {len(accum_pixels)}")
-
-        # Reset del color actual
-        elif key == ord("r"):
-            accum_pixels = []
-            print(f"Reset de capturas para {color_name}")
-
-        # Finalizar color y pasar al siguiente
-        elif key == ord("n"):
-            if not accum_pixels:
-                print(f"No hay capturas para {color_name}. Presiona 'c' primero.")
+            frame = get_latest_frame(zed, timeout=1.0)
+            if frame is None:
                 continue
 
-            pixels_all = np.vstack(accum_pixels)  # (N_total_pix, 3)
-            median_hsv = np.median(pixels_all, axis=0).astype(int)
-            hh, ss, vv = int(median_hsv[0]), int(median_hsv[1]), int(median_hsv[2])
+            h, w = frame.shape[:2]
+            half = BOX_SIZE // 2
+            cx, cy = clamp_roi(cx, cy, half, w, h)
 
-            # Rangos con wrap-around (aplica a todos, pero solo rojo suele dispararlo)
-            ranges_list = hsv_bounds_with_wrap(hh, ss, vv, TOL_H, TOL_S, TOL_V)
+            # Dibujo del ROI
+            vis = frame.copy()
+            cv.rectangle(vis, (cx - half, cy - half), (cx + half, cy + half), (0, 255, 0), 2)
+            cv.putText(
+                vis,
+                f"Color: {color_name} | Capturas acumuladas: {len(accum_pixels)}",
+                (10, 30),
+                cv.FONT_HERSHEY_SIMPLEX,
+                0.8,
+                (255, 255, 255),
+                2
+            )
+            cv.putText(
+                vis,
+                "Flechas/WASD mover | c capturar | n siguiente | r reset | ESC salir",
+                (10, 60),
+                cv.FONT_HERSHEY_SIMPLEX,
+                0.6,
+                (255, 255, 255),
+                2
+            )
 
-            # Guardado: si solo hay 1 rango, mantenemos formato simple.
-            # Si hay 2 (típico en rojo), guardamos lista.
-            if len(ranges_list) == 1:
-                calibrated[color_name] = ranges_list[0]
-            else:
-                calibrated[color_name] = ranges_list
+            cv.imshow(WINDOW_NAME, vis)
+            key = cv.waitKey(1) & 0xFF
 
-            print(f"{color_name} calibrado. Mediana HSV: {median_hsv}")
-            print(f"Rangos guardados: {calibrated[color_name]}")
+            # Movimiento (WASD)
+            if key == ord("a"):
+                cx -= MOVE_STEP
+            elif key == ord("d"):
+                cx += MOVE_STEP
+            elif key == ord("w"):
+                cy -= MOVE_STEP
+            elif key == ord("s"):
+                cy += MOVE_STEP
 
-            # limpiar para el siguiente color
-            accum_pixels = []
-            color_index += 1
+            # Flechas
+            elif key in (81,):
+                cx -= MOVE_STEP
+            elif key in (83,):
+                cx += MOVE_STEP
+            elif key in (82,):
+                cy -= MOVE_STEP
+            elif key in (84,):
+                cy += MOVE_STEP
 
-        # Salir (guarda lo que haya)
-        elif key == 27:
-            break
+            # Capturar y acumular
+            elif key == ord("c"):
+                pixels = capture_pixels(zed, cx, cy, half, N_SAMPLES, SAMPLE_DELAY)
+                if pixels is None:
+                    print("No se pudo capturar pixeles desde la ZED (reintenta).")
+                else:
+                    accum_pixels.append(pixels)
+                    print(f"Captura añadida para {color_name}. Total: {len(accum_pixels)}")
 
-    # Guardar archivo
-    atomic_json_dump(calibrated, file_path)
-    print("Calibración completada")
-    print("Guardado en:", file_path)
+            # Reset del color actual
+            elif key == ord("r"):
+                accum_pixels = []
+                print(f"Reset de capturas para {color_name}")
 
-    cap.release()
-    cv.destroyAllWindows()
+            # Finalizar color y pasar al siguiente
+            elif key == ord("n"):
+                if not accum_pixels:
+                    print(f"No hay capturas para {color_name}. Presiona 'c' primero.")
+                    continue
+
+                pixels_all = np.vstack(accum_pixels)
+                median_hsv = np.median(pixels_all, axis=0).astype(int)
+                hh, ss, vv = int(median_hsv[0]), int(median_hsv[1]), int(median_hsv[2])
+
+                ranges_list = hsv_bounds_with_wrap(hh, ss, vv, TOL_H, TOL_S, TOL_V)
+
+                if len(ranges_list) == 1:
+                    calibrated[color_name] = ranges_list[0]
+                else:
+                    calibrated[color_name] = ranges_list
+
+                print(f"{color_name} calibrado. Mediana HSV: {median_hsv}")
+                print(f"Rangos guardados: {calibrated[color_name]}")
+
+                accum_pixels = []
+                color_index += 1
+
+            elif key == 27:
+                break
+
+        atomic_json_dump(calibrated, file_path)
+        print("Calibración completada")
+        print("Guardado en:", file_path)
+
+    finally:
+        if zed is not None:
+            zed.stop()
+        cv.destroyAllWindows()
 
 
 if __name__ == "__main__":
     main()
-
-        

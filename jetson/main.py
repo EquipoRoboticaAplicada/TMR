@@ -9,7 +9,7 @@ from odo import RoverOdometry
 from local_debug import run_debug
 import threading
 
-DRAW_LOCAL = False   # ← cambiar a False para desactivar la ventana de debug
+DRAW_LOCAL =True   # ← cambiar a False para desactivar la ventana de debug
 
 
 if __name__ == "__main__":
@@ -60,10 +60,10 @@ if __name__ == "__main__":
         finally:
             tracker.stop()
             sender_local.stop()
-            odo.stop()
-            esp.close()
             vision.stop()
             zed.stop()
+            odo.stop()
+            esp.close()
     else:
         # Sin debug: Flask ya corre en su hilo, el proceso vive hasta Ctrl+C
         try:

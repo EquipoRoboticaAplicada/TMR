@@ -100,6 +100,8 @@ class ImgProcessorJetson:
                             left_rpm = right_rpm = 0
                             dir_left = dir_right = 1
                             self._sender.send_vision(0, 0, dir_left, dir_right)
+                            self._sender.esp.act_arm()
+                            self._sender.esp.wait_for_peso_change()
                             command_send_counter = 0
                         elif turn > 0:
                             left_rpm = right_rpm = rot

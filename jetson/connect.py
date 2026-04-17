@@ -170,11 +170,10 @@ class ESP:
         try:
             try:
                 data = line.split(",")
-                if len(data) != 6:   # ← 6, no 5
+                if len(data) != 6:   
                     return
                 header = data[0]
-                _, p, h, v, t, w = data   # ← descartar header en el unpack
-
+                _, p, h, v, t, w = data
                 
                 if header != "sensores":
                     ValueError(f"Header desconocido: {header}")
@@ -193,6 +192,7 @@ class ESP:
                 self._sensor_state["sensores"].update(
                     {"pitch": pitch, "heading": heading, "velocity": velocity, "terrain_text": terrain_text, "peso": peso}
                 )
+                print(f"[Sensores] Pitch: {pitch:.2f}°, Heading: {heading:.2f}°, Velocidad: {velocity:.2f} m/s, Terreno: {terrain_text}, Peso: {peso:.2f} kg\n") # DEBUG
                 self._sensor_state["last_update"] = time.time()
         except ValueError as e:
             print(f"[parse] ValueError en: {repr(line)} → {e}")
@@ -287,6 +287,25 @@ class ESP:
             except serial.SerialException as e:
                 print(f"[send_uart] Error escribiendo a ESP_R: {e}")
                 self._ser_right = None
+
+    def wait_for_peso_change(self, timeout: float = 10.0, poll_interval: float = 0.05) -> bool:
+        """
+        Bloquea el hilo llamante hasta que el valor de 'peso' en _sensor_state cambie.
+        Retorna True si detectó un cambio, False si se agotó el timeout.
+        """
+        with self._lock:
+            initial_peso = self._sensor_state["sensores"]["peso"]
+
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            time.sleep(poll_interval)
+            with self._lock:
+                current_peso = self._sensor_state["sensores"]["peso"]
+            if current_peso < initial_peso*0.9 or current_peso > initial_peso*1.1:  
+                return True
+
+        print("[wait_for_peso_change] Timeout: no se detectó cambio en 'peso'.\n")
+        return False
 
     def act_arm(self):
         try: 

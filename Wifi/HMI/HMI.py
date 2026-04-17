@@ -1,4 +1,6 @@
 import sys
+import os
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import math
 from PyQt5.QtWidgets import QApplication, QMainWindow, QTableWidgetItem, QOpenGLWidget
 from PyQt5.QtGui import QPainter, QColor, QPen, QPolygonF, QLinearGradient
@@ -182,7 +184,7 @@ class MiRoverGUI(QMainWindow):
         self.ui.openGLWidget_2 = self.mapa_topografico
 
         # 3. Configurar Conexión a la Jetson (Real Data)
-        self.IP_JETSON = "192.168.1.XX"  # <--- CAMBIA ESTO POR LA IP DE TU JETSON
+        self.IP_JETSON = "172.32.237.112"  # <--- CAMBIA ESTO POR LA IP DE TU JETSON
         self.receiver = Receiver(PI_IP=self.IP_JETSON, poll_hz=10.0)
         self.receiver.start()
         print(f"📡 Intentando conectar con Jetson en http://{self.IP_JETSON}:5000 ...")
