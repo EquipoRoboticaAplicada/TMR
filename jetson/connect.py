@@ -219,7 +219,7 @@ class ESP:
                 seq    = int(parts[1])
                 m_data = [
                     {"rpm": float(parts[2]), "m/s": float(parts[3])},
-                    {"rpm": float(parts[4]), "m/s": float(parts[5])},
+                   # {"rpm": float(parts[4]), "m/s": float(parts[5])},
                     # {"rpm": float(parts[6]), "m/s": float(parts[7])}, # Solo 2 motores por lado, no 3. Encoders muertos. 
                 ]
 
