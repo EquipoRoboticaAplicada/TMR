@@ -211,7 +211,7 @@ class ESP:
             # print(line) # DEBUG
             parts = line.strip().split(',')
 
-            if len(parts) != 8:
+            if len(parts) != 4:
                 return
 
             try:
