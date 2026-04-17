@@ -9,6 +9,7 @@
 /* ===== I2C ===== */
 #define SDA_PIN 21
 #define SCL_PIN 22
+//#define IMU_DESCONECTADO //  ← comentar esta línea para re-activar el IMU
 
 /* ===== HX711 ===== */
 #define DT 26
@@ -20,9 +21,19 @@ float calibration_factor = 687;
 Adafruit_LSM303DLH_Mag_Unified   mag   = Adafruit_LSM303DLH_Mag_Unified(12345);
 Adafruit_LSM303_Accel_Unified    accel = Adafruit_LSM303_Accel_Unified(54321);
 
-/* ===== Calibración magnetómetro (hard/soft iron) ===== */
-const float MAG_MIN_X = -40.18,  MAG_MAX_X = 49.45;
-const float MAG_MIN_Y = -82.55,  MAG_MAX_Y = 30.73;
+/*
+Mag Minimums: -69.73  -59.09  -101.43
+Mag Maximums: 65.27  55.82  48.06
+*/
+
+/* ===== Offsets ===== */
+const float MAG_MIN_X = -69.73; // -40.18
+const float MAG_MAX_X =  65.27; // 49.45
+const float MAG_MIN_Y = -59.09; // -82.55
+const float MAG_MAX_Y =   55.82; // 30.73
+float offsetZ = -55.32;// -55.32 -23.325
+
+// Para calcular offsets para arreglar distorsion de hard iron & soft iron
 const float OFFSET_X  = (MAG_MAX_X + MAG_MIN_X) / 2.0f;
 const float OFFSET_Y  = (MAG_MAX_Y + MAG_MIN_Y) / 2.0f;
 const float RANGE_X   = (MAG_MAX_X - MAG_MIN_X) / 2.0f;
@@ -51,7 +62,7 @@ unsigned long lastPrint = 0;
 /* ===== Watchdog I2C ===== */
 static uint8_t zeroCount = 0;
 
-/* ===== Servos Brazo ===== */
+/* ===== Servos Brazo ===== */ /////////////////nuevooooooooooooooooooooooooooooooo
 Servo servo1;
 Servo servo2;
 Servo servoGripper;
@@ -67,7 +78,7 @@ struct DatosIMU {
   float heading;
   float velocity;
   String terrain;
-};
+}; //                     ---------------------------nuevo---------------------------
 
 /* ============================================================
    Funciones de bajo nivel
@@ -84,25 +95,27 @@ void i2cReset() {
   Wire.setClock(100000);
   delay(50);
   imuInit();
+  //Serial.println("I2C reiniciado.");
 }
 
 String detectTerrain(float pitch) {
-  if      (pitch >  15) return "UP";
-  else if (pitch < -15) return "DOWN";
+  // -3.30 en cero
+  if      (pitch >  5) return "UP";
+  else if (pitch < -5) return "DOWN";
   else                  return "FLAT";
 }
 
-void arm_down() {
-  int destino = 0;
+void arm_down() { // ---------------------------------------nuevo------------------
+  int destino = 20;
   while (posicionActual != destino) {
     posicionActual += (posicionActual < destino) ? 1 : -1;
     servo1.write(posicionActual);
     servo2.write(180 - posicionActual);
     delay(15);
   }
-}
+} // -----------------------------------------------------------nuevo----------------------
 
-void arm_up() {
+void arm_up() { // -------------------------------------- nuevo--------------
   int destino = 180;
   while (posicionActual != destino) {
     posicionActual += (posicionActual < destino) ? 1 : -1;
@@ -110,7 +123,7 @@ void arm_up() {
     servo2.write(180 - posicionActual);
     delay(15);
   }
-}
+} // ----------------------------------------------------  nuevo -----------------
 
 void box_open() {
   servoBox.write(110); 
@@ -162,7 +175,7 @@ bool manejarComandoSerial() {
     delay(300);
     arm_up();
     delay(500);
-    servoGripper.write(160);    // abrir gripper
+    servoGripper.write(135);    // abrir gripper
     delay(500);
     peso_actual = leerPesoDirecto();  // medir mientras sostiene el objeto
     lastTime = millis();        // resetear dt para no acumular el tiempo del movimiento
@@ -251,6 +264,14 @@ void actualizarVelocidad(float ax, float pitchRad, float dt) {
    Devuelve false si el sensor está colgado.
    ============================================================ */
 bool procesarIMU(DatosIMU &datos, float dt) {
+    #ifdef IMU_DESCONECTADO
+    datos.pitch      = 0.0f;
+    datos.headingRaw = 0.0f;
+    datos.heading    = 0.0f;
+    datos.velocity   = 0.0f;
+    datos.terrain    = "FLAT";
+    return true;
+  #endif
   float ax, ay, az;
   if (!leerAcelerometro(ax, ay, az)) return false;
 
@@ -262,7 +283,7 @@ bool procesarIMU(DatosIMU &datos, float dt) {
 
   actualizarVelocidad(ax, pitchRad, dt);
 
-  datos.pitch      = pitchF;
+  datos.pitch      = pitchF + 2.7; // offset 
   datos.headingRaw = headingRaw;
   datos.heading    = heading;
   datos.velocity   = velocity;
@@ -297,7 +318,10 @@ void setup() {
 
   Wire.begin(SDA_PIN, SCL_PIN);
   Wire.setClock(100000);
-  imuInit();
+
+  #ifndef IMU_DESCONECTADO
+    imuInit();
+  #endif
 
   celda.begin(DT, SCK);
   celda.set_scale(calibration_factor);
@@ -313,14 +337,14 @@ void setup() {
   servoGripper.setPeriodHertz(50);
   servoBox.setPeriodHertz(50);
   
-  servo1.attach(32, 500, 2500);
-  servo2.attach(33, 500, 2500);
+  servo1.attach(33, 500, 2500); // Servo de afuera 
+  servo2.attach(32, 500, 2500); // Servo de adentro
   servoGripper.attach(14, 500, 2500);
   servoBox.attach(27, 500, 2500);
 
   servo1.write(posicionActual);
   servo2.write(180 - posicionActual);
-  servoGripper.write(160);
+  servoGripper.write(135);
   servoBox.write(20);
 
   lastTime = millis();
@@ -347,6 +371,7 @@ void loop() {
 
   // 4. Transmitir datos por serial sin bloquear
   imprimirDatos(datos);
+
 
   delay(20);
 }
