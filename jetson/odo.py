@@ -72,7 +72,7 @@ class RoverOdometry:
             θ    += omega · dt
         """
         new_state = self.esp.get_rover_state()
-        # print(f"[RoverOdometry] Nuevo rover_state: {new_state}") # DEBUG
+        print(f"[RoverOdometry] Nuevo rover_state: {new_state}") # DEBUG
         with self._state_lock:
             self._state = new_state
 
@@ -91,7 +91,7 @@ class RoverOdometry:
             # y 10% a los extremos para no descartarlos por completo si el centro pierde tracción.
             v_l = (m_l[0]["m/s"]) #+ (m_l[1]["m/s"] * 0.3) # + (m_l[2]["m/s"] * 0.1)
             v_r = (m_r[0]["m/s"]) #+ (m_r[1]["m/s"] * 0.2) # + (m_r[2]["m/s"] * 0.1)
-            # print(f"[RoverOdometry] v_l: {v_l:.3f} m/s, v_r: {v_r:.3f} m/s") # DEBUG
+            print(f"[RoverOdometry] v_l: {v_l:.3f} m/s, v_r: {v_r:.3f} m/s") # DEBUG
 
             v = (v_l + v_r) / 2.0
             omega = (v_r - v_l) / self.L

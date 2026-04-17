@@ -6,7 +6,7 @@ import time
 class Route_Command:
 
     def __init__(self, sender, vision_override_event, path=None, esp=None):
-        self.default_route   = [(0, 3), (3, 3)]
+        self.default_route   = [(1,0)]
         self.path            = path or self.default_route
         self.sender          = sender
         self.vision_override = vision_override_event
@@ -91,7 +91,7 @@ class Route_Command:
     def follow_path(self, rover_odometry):
         DIST_TOLERANCE  = 0.2   # m   — distancia para considerar que se llegó al punto
         ANGLE_TOLERANCE = 0.1   # rad — error angular antes de avanzar recto
-        BASE_RPM        = 45
+        BASE_RPM        = 20
 
         FWD  = "D1"
         BWD  = "D0"
