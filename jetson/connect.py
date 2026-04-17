@@ -1,6 +1,7 @@
 import threading
 import platform
 import serial
+import serial.tools.list_ports
 import time
 import copy
 
