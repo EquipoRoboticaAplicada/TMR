@@ -2,7 +2,7 @@ import sys
 import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import math
-from PyQt5.QtWidgets import QApplication, QMainWindow, QTableWidgetItem, QOpenGLWidget
+from PyQt5.QtWidgets import QApplication, QMainWindow, QTableWidgetItem, QWidget
 from PyQt5.QtGui import QPainter, QColor, QPen, QPolygonF, QLinearGradient
 from PyQt5.QtCore import Qt, QTimer, QPointF
 
@@ -36,7 +36,7 @@ def get_pitch_color(pitch):
 
 # ===== WIDGETS PERSONALIZADOS =====
 
-class MapaNativoWidget(QOpenGLWidget):
+class MapaNativoWidget(QWidget):
     """Widget para dibujar el mapa de trayectoria (Pestaña 1)"""
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -103,7 +103,7 @@ class MapaNativoWidget(QOpenGLWidget):
         painter.setPen(Qt.NoPen)
         painter.drawPolygon(poligono)
 
-class MapaTopograficoWidget(QOpenGLWidget):
+class MapaTopograficoWidget(QWidget):
     """Widget para dibujar el heatmap topográfico y la barra de calor (Pestaña 2)"""
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -186,7 +186,7 @@ class MiRoverGUI(QMainWindow):
         # 3. Configurar Conexión a la Jetson (Real Data)
         self.IP_JETSON = "172.32.237.112"  # <--- CAMBIA ESTO POR LA IP DE TU JETSON
         self.receiver = Receiver(PI_IP=self.IP_JETSON, poll_hz=10.0)
-        self.receiver.start()
+        self.receiver.start() 
         print(f"📡 Intentando conectar con Jetson en http://{self.IP_JETSON}:5000 ...")
 
         # 4. Iniciar Timer de Actualización de HMI (10Hz / 100ms)
