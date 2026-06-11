@@ -24,8 +24,8 @@ const unsigned long DIR_CHANGE_HOLD_MS = 120;
 const float WHEEL_DIAM_M = 0.17f;
 const float WHEEL_CIRC_M = 3.14159265f * WHEEL_DIAM_M;
 
-float Kp[3] = {0.0, 0.0, 0.0};
-float Ki[3] = {1.0, 1.0, 1.0};
+float Kp[3] = {1.0, 0.0, 0.0};
+float Ki[3] = {0.0, 1.0, 1.0};
 float Kd[3] = {0.0, 0.0, 0.0};
 const float INTEGRAL_MAX = 200.0;
 
@@ -235,12 +235,12 @@ void loop() {
   readSerialLines();
 
     // Failsafe
-    if (millis() - lastCmdMs > CMD_TIMEOUT_MS) {
-      for (int i = 0; i < 3; i++) {
-        motor[i].setpointRPM = 0.0f;
-      motor[i].errorSum    = 0.0f;
-      }
-    }
+//    if (millis() - lastCmdMs > CMD_TIMEOUT_MS) {
+//      for (int i = 0; i < 3; i++) {
+//        motor[i].setpointRPM = 0.0f;
+//      motor[i].errorSum    = 0.0f;
+//      }
+//    }
 
   unsigned long now = millis();
   if (now - lastSampleTime >= SAMPLE_MS) {
@@ -273,26 +273,26 @@ void loop() {
     }
     
       // Paquete UART: ID, seq, rpm0, v0, rpm1, v1, rpm2, v2
-      Serial.print(ESP_ID); Serial.print(",");
-      Serial.print(seq++);
-
-      for (int i = 0; i < 3; i++) {
-        Serial.print(",");
-        Serial.print(motor[i].currentRPM, 2);
-        Serial.print(",");
-        Serial.print(v_mps[i], 4);
-      }
-      Serial.println();
+//      Serial.print(ESP_ID); Serial.print(",");
+//      Serial.print(seq++);
+//
+//      for (int i = 0; i < 3; i++) {
+//        Serial.print(",");
+//        Serial.print(motor[i].currentRPM, 2);
+//        Serial.print(",");
+//        Serial.print(v_mps[i], 4);
+//      }
+//      Serial.println();
 
       // Diagnóstico
-//      for(int i = 0; i < 3; i++)
-//      {
-//        Serial.print(" SP:"); Serial.print(motor[i].setpointRPM);
-//        Serial.print(" PV:"); Serial.print(motor[i].currentRPM);
-//        Serial.print(" ERR:"); Serial.print(motor[i].errorSum);
-//        Serial.print(" PWM:"); Serial.print(motor[i].pwmPercent);
-//      }
-//      Serial.println();  
+      for(int i = 0; i < 1; i++)
+      {
+        Serial.print(" SP:"); Serial.print(motor[i].setpointRPM);
+        Serial.print(" PV:"); Serial.print(motor[i].currentRPM);
+        Serial.print(" ERR:"); Serial.print(motor[i].errorSum);
+        Serial.print(" PWM:"); Serial.print(motor[i].pwmPercent);
+      }
+      Serial.println();  
 
     lastSampleTime = now;
   }

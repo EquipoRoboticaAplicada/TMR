@@ -124,7 +124,7 @@ void IRAM_ATTR encoderISR(void* arg) {
 float calcularRPMFirmada(long dticks, float dt) {
   if (dt <= 0.0f || CPR_OUTPUT == 0) return 0.0f;
   float rpmNatural = (dticks / (float)CPR_OUTPUT) * (60.0f / dt);
-  return -rpmNatural; // inversión de signo para el lado derecho
+  return rpmNatural; // inversión de signo para el lado derecho
 }
 
 float calcularVelocidadMPSDesdeRPM(float rpmSigned) {

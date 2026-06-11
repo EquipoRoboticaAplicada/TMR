@@ -40,10 +40,10 @@ const unsigned long DIR_CHANGE_HOLD_MS = 500;
 const float STOP_THRESHOLD_RPM = 3.0f;
 // ─────────────────────────────────────────────────────
 
-const bool ENABLE_CMD_TIMEOUT = true;
+const bool ENABLE_CMD_TIMEOUT = false;
 const unsigned long CMD_TIMEOUT_MS = 3000;
 
-const bool PLOTTER_MODE = false;
+const bool PLOTTER_MODE = true;
 const int PLOT_MOTOR_IDX = 0;
 
 const float WHEEL_DIAM_M = 0.17f;
