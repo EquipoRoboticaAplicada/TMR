@@ -1,171 +1,100 @@
-import requests
 import threading
+import json
 import time
-
+import paho.mqtt.client as mqtt
 
 class Receiver:
-    """
-    Corre en la PC/laptop. Hace polling al endpoint /odometry del servidor
-    Flask en la Jetson para obtener pose y velocidad en tiempo real.
-
-    Interfaz pública:
-        .pose     → (x, y, theta)   metros / radianes
-        .velocity → (v, omega)      m/s / rad/s
-        .is_stale → bool            True si no hay datos frescos
-        .reset_pose()               envía reset de odometría a la Jetson
-    """
-
-    STALE_TIMEOUT = 3.0
-    MAX_BACKOFF   = 30.0
-
-    def __init__(self, PI_IP: str, poll_hz: float = 20.0):
-        self._base_url      = f"http://{PI_IP}:5000"
-        self._pose_url      = f"{self._base_url}/odometry"
-        self._reset_url     = f"{self._base_url}/pose/reset"
-        self._sensors_url   = f"{self._base_url}/sensors"
-        self._poll_interval = 1.0 / poll_hz
-
-        self._lock        = threading.Lock()
-        self._x           = 0.0
-        self._y           = 0.0
-        self._theta       = 0.0
-        self._v           = 0.0
-        self._omega       = 0.0
-        self._last_update = 0.0
-
-        self._pitch = 0.0
-        self._heading = 0.0
-        self._velocity = 0.0
+    def __init__(self, broker_ip="localhost", port=1883, poll_hz=10.0):
+        self.broker_ip = broker_ip
+        self.port = port
+        self._lock = threading.Lock()
+        
+        # Keep the exact same variable naming structure your HMI expects
+        self.pose = (0.0, 0.0, 0.0)      # (x, y, theta)
+        self.velocity = (0.0, 0.0)      # (v_lineal, v_angular)
+        self.pitch = 0.0
+        self.heading = 0.0
         self._terrain_text = "NONE"
         self._peso = 0.0
-        self._sensor_state = {"last_update": 0.0}
+        
+        # Stale/Timeout tracking
+        self.is_stale = True
+        self._last_msg_time = 0
+        self._timeout_threshold = 2.0  # seconds before showing disconnected
 
-        self._stop_event  = threading.Event()
-        self._thread      = threading.Thread(target=self._run, daemon=True)
+        # Initialize MQTT client
+        self.client = mqtt.Client(callback_api_version=mqtt.CallbackAPIVersion.VERSION2, client_id="HMI_Base_Station")
+        self.client.on_connect = self.on_connect
+        self.client.on_message = self.on_message
 
-    # ------------------------------------------------------------------ #
+    def on_connect(self, client, userdata, flags, rc, properties=None):
+        if rc == 0:
+            print("HMI Receiver connected to MQTT Broker!")
+            # Subscribe to all telemetry coming from the rover
+            self.client.subscribe("rover/odometry", qos=0)
+            self.client.subscribe("rover/sensors", qos=0)
+            self.client.subscribe("rover/telemetry", qos=0)
+            self.client.subscribe("rover/status", qos=1)
+        else:
+            print(f"HMI Receiver connection failed with code {rc}")
 
-    def start(self):
-        self._thread.start()
-        return self
-
-    def stop(self):
-        self._stop_event.set()
-        self._thread.join(timeout=2.0)
-
-    # ------------------------------------------------------------------ #
-    #  Hilo de polling                                                     #
-    # ------------------------------------------------------------------ #
-
-    def _run(self):
-        session = requests.Session()
-        backoff = 1.0
-
-        while not self._stop_event.is_set():
-            t0 = time.time()
+    def on_message(self, client, userdata, msg):
+        """Processes incoming data and safely updates variables using thread locks."""
+        with self._lock:
+            self._last_msg_time = time.time()
+            self.is_stale = False
+            
             try:
-                r = session.get(self._pose_url, timeout=1.0)
-                r.raise_for_status()
-                data_m = r.json()
-
-                with self._lock:
-                    self._x           = _safe_float(data_m.get("x"),     0.0)
-                    self._y           = _safe_float(data_m.get("y"),     0.0)
-                    self._theta       = _safe_float(data_m.get("theta"), 0.0)
-                    self._v           = _safe_float(data_m.get("v"),     0.0)
-                    self._omega       = _safe_float(data_m.get("omega"), 0.0)
-                    self._last_update = time.time()
-
-                s = session.get(self._sensors_url, timeout=1.0)
-                s.raise_for_status()
-                data_s = s.json()
-
-                # formato: "sensores": {"pitch": 0.0, "heading": 0.0, "velocity": 0.0, "terrain_text": None, "peso": 0.0},
-                with self._lock:
-                    self._pitch       = _safe_float(data_s["sensores"].get("pitch"), 0.0)
-                    self._heading     = _safe_float(data_s["sensores"].get("heading"), 0.0)
-                    self._velocity     = _safe_float(data_s["sensores"].get("velocity"), 0.0)
-                    self._terrain_text = data_s["sensores"].get("terrain_text", "NONE")
-                    self._peso         = _safe_float(data_s["sensores"].get("peso"), 0.0)
-                    self._sensor_state["last_update"] = time.time()
+                payload = json.loads(msg.payload.decode())
                 
-                backoff = 1.0
-
-            except requests.exceptions.Timeout:
-                print("[Receiver] Timeout — servidor no responde.")
-
-            except requests.exceptions.ConnectionError:
-                print(f"[Receiver] Sin conexión. Reintentando en {backoff:.0f}s...")
-                time.sleep(backoff)
-                backoff = min(backoff * 2, self.MAX_BACKOFF)
-                continue
-
-            except requests.exceptions.HTTPError as e:
-                print(f"[Receiver] HTTP {e.response.status_code}.")
+                if msg.topic == "rover/odometry":
+                    self.pose = (payload.get("x", 0.0), payload.get("y", 0.0), payload.get("theta", 0.0))
+                    self.velocity = (payload.get("v", 0.0), payload.get("omega", 0.0))
+                    
+                elif msg.topic == "rover/sensors":
+                    # Adapt this mapping to match what your esp.get_sensor_state() structure sends
+                    sensor_state = payload.get("rover_sensors", {})
+                    self.pitch = sensor_state.get("pitch", 0.0)
+                    self.heading = sensor_state.get("heading", 0.0)
+                    self._terrain_text = sensor_state.get("terrain", "NONE")
+                    
+                elif msg.topic == "rover/telemetry":
+                    rover_state = payload.get("rover_state", {})
+                    self._peso = rover_state.get("peso", 0.0)
+                    
+                elif msg.topic == "rover/status":
+                    if msg.payload.decode() == "offline":
+                        self.is_stale = True
 
             except Exception as e:
-                print(f"[Receiver] Error inesperado: {e}")
+                print(f"Error parsing topic {msg.topic}: {e}")
 
-            elapsed = time.time() - t0
-            sleep   = self._poll_interval - elapsed
-            if sleep > 0:
-                time.sleep(sleep)
+    def _monitor_connection(self):
+        """Background loop checking if the rover has stopped transmitting."""
+        while self._running:
+            if time.time() - self._last_msg_time > self._timeout_threshold:
+                with self._lock:
+                    self.is_stale = True
+            time.sleep(0.5)
 
-        session.close()
-
-    # ------------------------------------------------------------------ #
-    #  API pública                                                         #
-    # ------------------------------------------------------------------ #
-
-    @property
-    def pose(self) -> tuple:
-        with self._lock:
-            return (self._x, self._y, self._theta)
-
-    @property
-    def velocity(self) -> tuple:
-        with self._lock:
-            return (self._v, self._omega)
+    def start(self):
+        self._running = True
+        print(f"Connecting to MQTT Broker at {self.broker_ip}...")
+        self.client.connect(self.broker_ip, self.port, keepalive=60)
         
-    @property
-    def pitch(self) -> float:
-        with self._lock:
-            return self._pitch
-
-    @property
-    def heading(self) -> float:
-        with self._lock:
-            return self._heading
-
-    @property
-    def is_stale(self) -> bool:
-        with self._lock:
-            return (time.time() - self._last_update) > self.STALE_TIMEOUT
-
-    def reset_pose(self):
-        try:
+        # Start MQTT thread network loop
+        self.client.loop_start()
         
-            r = requests.post(self._reset_url, timeout=2.0)
-            r.raise_for_status()
+        # Start connection watchdog monitor thread
+        self.monitor_thread = threading.Thread(target=self._monitor_connection, daemon=True)
+        self.monitor_thread.start()
 
-            with self._lock:
-                self._x=0.0
-                self._y=0.0
-                self._theta=0.0
-                self._v=0.0
-                self._omega=0.0
-            print("[Receiver] Pose reseteada.")
-        except requests.exceptions.HTTPError as e:
-            print(f"[Receiver] Reset rechazado ({e.response.status_code}).")
-        except Exception as e:
-            print(f"[Receiver] Error inesperado en reset: {e}")
+    def stop(self):
+        self._running = False
+        self.client.loop_stop()
+        self.client.disconnect()
         
-
-
-# ------------------------------------------------------------------ #
-
-def _safe_float(val, default: float = 0.0) -> float:
-    try:
-        return float(val)
-    except (TypeError, ValueError):
-        return default
+    def reset_rover_pose(self):
+        """Call this from the UI to publish a command back to the Jetson."""
+        command = {"action": "reset_pose"}
+        self.client.publish("rover/commands", json.dumps(command), qos=1)

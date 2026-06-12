@@ -183,11 +183,11 @@ class MiRoverGUI(QMainWindow):
         self.ui.openGLWidget_2.deleteLater()
         self.ui.openGLWidget_2 = self.mapa_topografico
 
-        # 3. Configurar Conexión a la Jetson (Real Data)
-        self.IP_JETSON = "172.32.237.112"  # <--- CAMBIA ESTO POR LA IP DE TU JETSON
-        self.receiver = Receiver(PI_IP=self.IP_JETSON, poll_hz=10.0)
+        # 3. Configurar Conexión al Broker MQTT (Lado Base)
+        self.BROKER_IP = "172.32.237.112" 
+        self.receiver = Receiver(broker_ip=self.BROKER_IP)
         self.receiver.start() 
-        print(f"📡 Intentando conectar con Jetson en http://{self.IP_JETSON}:5000 ...")
+        print(f"📡 HMI Receiver conectado al Broker MQTT en {self.BROKER_IP}:1883")
 
         # 4. Iniciar Timer de Actualización de HMI (10Hz / 100ms)
         self.timer = QTimer()
