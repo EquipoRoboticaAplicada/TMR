@@ -42,8 +42,17 @@ if __name__ == "__main__":
     )
 
     # 8. Servidor Flask en hilo secundario (OpenCV necesita el hilo principal)
+    # 8. Servidor MQTT en hilo secundario (OpenCV necesita el hilo principal)
     server.init_app(esp, zed, vision, tracker, odo, rvr_cmd)
-    threading.Thread(target=server.run, daemon=True).start()
+    
+    # CAMBIA ESTO por la dirección IP real de tu computadora/Laptop
+    LAPTOP_BROKER_IP = "172.32.237.112" 
+    
+    threading.Thread(
+        target=server.run, 
+        kwargs={"broker_ip": LAPTOP_BROKER_IP, "broker_port": 1883}, 
+        daemon=True
+    ).start()
 
     threading.Thread(
         target=rvr_cmd.follow_path,
