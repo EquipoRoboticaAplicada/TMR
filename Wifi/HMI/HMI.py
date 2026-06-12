@@ -184,7 +184,7 @@ class MiRoverGUI(QMainWindow):
         self.ui.openGLWidget_2 = self.mapa_topografico
 
         # 3. Configurar Conexión al Broker MQTT (Lado Base)
-        self.BROKER_IP = "172.32.237.112" 
+        self.BROKER_IP = "localhost" 
         self.receiver = Receiver(broker_ip=self.BROKER_IP)
         self.receiver.start() 
         print(f"📡 HMI Receiver conectado al Broker MQTT en {self.BROKER_IP}:1883")
