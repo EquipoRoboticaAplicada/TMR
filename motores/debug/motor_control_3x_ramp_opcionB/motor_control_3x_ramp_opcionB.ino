@@ -10,12 +10,25 @@
 //    S0\n     — detener
 // ============================================================
 
+// const char* ESP_ID = "ESP_L"; 
+const char* ESP_ID = "ESP_R"; 
+
+unsigned int seq = 0;
+
 // ── Pines ───────────────────────────────────────────────────
 //                  Motor 0   Motor 1   Motor 2
-const int IN1[3] = { 13, 26, 25 };   // RPWM
-const int IN2[3] = { 14, 27, 23 };   // LPWM
-const int ENC_A[3] = {  4, 16, 18 };
-const int ENC_B[3] = {  5, 17, 19 };
+
+// izq
+//const int IN1[3] = { 13, 25, 26 };   // RPWM
+//const int IN2[3] = { 14, 23, 27 };   // LPWM 
+//const int ENC_A[3] = {  4, 16, 18 };
+//const int ENC_B[3] = {  5, 17, 19 };
+
+// der
+const int IN1[3] = {14, 27, 23};  
+const int IN2[3] = {13, 26, 25};  
+const int ENC_A[3] = {4,  16, 18};
+const int ENC_B[3] = {5,  17, 19};
 
 // ── PWM ─────────────────────────────────────────────────────
 #define PWM_FREQ       20000   // Hz
@@ -32,11 +45,14 @@ const float SP_RAMP_RPM_S  = 60.0f; // límite de cambio del setpoint [RPM/s]
 const int8_t ENC_SIGN[3]   = { +1, +1, +1 };
 const int8_t MOTOR_SIGN[3] = { +1, +1, +1 };
 
+const float WHEEL_DIAM_M = 0.17f; 
+const float WHEEL_CIRC_M = 3.14159265f * WHEEL_DIAM_M;
+
 // ── PID (mismos ganancias para los 3 motores; ajusta según tu planta) ──
 float Kp = 1.0f;
 float Ki = 0.8f;
 float Kd = 0.0f;
-const float INTEGRAL_MAX = 200.0f;   // anti-windup
+const float INTEGRAL_MAX = 50.0f;   // anti-windup
 
 // ── Muestreo ────────────────────────────────────────────────
 const unsigned long SAMPLE_MS = 100;   // período de control
@@ -51,6 +67,7 @@ struct Motor {
   float setpointRPM = 0.0f;   // objetivo solicitado por Serial, con signo
   float rampedSP    = 0.0f;   // referencia suavizada usada por el PID
   float currentRPM  = 0.0f;   // con signo: viene directo de los ticks
+  float v_mps       = 0.0f;
 
   float integral    = 0.0f;
   float errorPrev   = 0.0f;
@@ -99,6 +116,15 @@ void IRAM_ATTR encoderISR(void* arg) {
 float calcRPM(long dt_ticks, float dt_s) {
   if (dt_s <= 0.0f || CPR_OUTPUT == 0.0f) return 0.0f;
   return (dt_ticks / CPR_OUTPUT) * (60.0f / dt_s);
+}
+
+// ============================================================
+//  Cálculo de RPM
+// ============================================================
+float calcularVelocidadMPS(Motor &m, float dt_s) {
+  if (dt_s <= 0.0f) return 0.0f;
+  float m_s = WHEEL_CIRC_M * m.currentRPM / 60;
+  return m_s;
 }
 
 // ============================================================
@@ -155,7 +181,6 @@ float computePID(Motor &m, float dt) {
 
   float pidRPM = P + I + D;
 
-  // Opción B:
   // El PID solo puede pedir magnitud positiva de PWM.
   // Si el motor va más rápido que el setpoint, el PWM baja a 0,
   // pero NO invierte dirección para frenar.
@@ -284,7 +309,6 @@ void loop() {
   if (now - lastSampleMs < SAMPLE_MS) return;
 
   float dt = (now - lastSampleMs) / 1000.0f;
-  lastSampleMs = now;
 
   // Leer y reiniciar ticks de forma atómica
   long dt_ticks[3];
@@ -309,16 +333,34 @@ void loop() {
       motor[i].pwmPercent = fabs(pwmPerc);
       writeMotor(i, pwmPerc);
     }
+
+    motor[i].v_mps = calcularVelocidadMPS(motor[i], dt);
   }
 
-  // ── Telemetría por Serial ────────────────────────────────
-  //  Formato: M0 SP=XX.X RSP=XX.X PV=XX.X PWM=XX.X | M1 ... | M2 ...
+  // ============================================================
+  //  Paquete UART: ID, seq, rpm0, v0, rpm1, v1, rpm2, v2
+  // ============================================================
+  Serial.print(ESP_ID); Serial.print(",");
+  Serial.print(seq++);
+
   for (int i = 0; i < 3; i++) {
-    Serial.print("M"); Serial.print(i);
-    Serial.print(" SP=");   Serial.print(motor[i].setpointRPM, 1);
-    Serial.print(" RSP=");  Serial.print(motor[i].rampedSP,    1);
-    Serial.print(" PV=");   Serial.print(motor[i].currentRPM,  1);
-    Serial.print(" PWM=");  Serial.print(motor[i].pwmPercent,  1);
+    Serial.print(",");
+    Serial.print(motor[i].currentRPM, 2);
+    Serial.print(",");
+    Serial.print(motor[i].v_mps, 4);
   }
   Serial.println();
+
+  
+  // ============================================================
+  //  Diagnóstico (Serial Plotter)
+  // ============================================================
+//  for (int i = 0; i < 3; i++) {
+//    Serial.print(" SP:");   Serial.print(motor[i].setpointRPM, 1);
+//    Serial.print(" PV:");   Serial.print(motor[i].currentRPM,  1);
+//    Serial.print(" PWM:");  Serial.print(motor[i].pwmPercent,  1);
+//  }
+//  Serial.println();
+
+  lastSampleMs = now;
 }
