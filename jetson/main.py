@@ -39,11 +39,13 @@ if __name__ == "__main__":
         odo = DummyOdo()
 
     # 3. Cámara ZED
-    zed = ZEDShared().start()
+    #zed = ZEDShared().start()
 
     # 4. Pipeline de visión
-    vision = VisionZED(zed_shared=zed).start()
+    #vision = VisionZED(zed_shared=zed).start()
 
+    zed = none
+    vision = none
     # 5. Sender: único punto de escritura al ESP
     sender_local = SenderJetson(esp=esp).start()
 
