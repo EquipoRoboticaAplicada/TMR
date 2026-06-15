@@ -38,14 +38,20 @@ if __name__ == "__main__":
             def reset_pose(self): pass
         odo = DummyOdo()
 
+    # ==============================================================
+    #  COMENTA TEMPORALMENTE ESTAS LÍNEAS PARA COMPROBAR LA RED 
+    # ==============================================================
     # 3. Cámara ZED
-    #zed = ZEDShared().start()
+    # zed = ZEDShared().start()
 
     # 4. Pipeline de visión
-    #vision = VisionZED(zed_shared=zed).start()
-
+    # vision = VisionZED(zed_shared=zed).start()
+    
+    # Pasamos None a los inicializadores para evitar que arranquen hilos nativos defectuosos
     zed = None
     vision = None
+    # ==============================================================
+    
     # 5. Sender: único punto de escritura al ESP
     sender_local = SenderJetson(esp=esp).start()
 
