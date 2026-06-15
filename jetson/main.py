@@ -1,7 +1,6 @@
 # main.py
 from connect import ESP
 import server
-
 from vision_zed import VisionZED, ZEDShared
 from util import SenderJetson, ImgProcessorJetson
 from command import Route_Command
