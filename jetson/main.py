@@ -38,14 +38,16 @@ if __name__ == "__main__":
             def reset_pose(self): pass
         odo = DummyOdo()
 
-    # 3. Cámara ZED
-    #zed = ZEDShared().start()
+    print("📷 Inicializando Cámara ZED...")
+    zed = ZEDShared().start()
+    
+    # CRUCIAL: Le damos 3 segundos exactos a C++ para abrir la cámara
+    # y evitar que choque con el arranque de los hilos de Python.
+    time.sleep(3.0) 
 
-    # 4. Pipeline de visión
-    #vision = VisionZED(zed_shared=zed).start()
-
-    zed = None
-    vision = None
+    # 4. Pipeline de visión (Ya con la ZED despierta y estable)
+    vision = VisionZED(zed_shared=zed).start()
+    time.sleep(1.0) # Otra pequeña pausa de estabilización de hilos
     
     # 5. Sender: único punto de escritura al ESP
     sender_local = SenderJetson(esp=esp).start()
