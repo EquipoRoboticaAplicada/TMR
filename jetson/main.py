@@ -38,19 +38,14 @@ if __name__ == "__main__":
             def reset_pose(self): pass
         odo = DummyOdo()
 
-    # ==============================================================
-    #  COMENTA TEMPORALMENTE ESTAS LÍNEAS PARA COMPROBAR LA RED 
-    # ==============================================================
     # 3. Cámara ZED
-    # zed = ZEDShared().start()
+    #zed = ZEDShared().start()
 
     # 4. Pipeline de visión
-    # vision = VisionZED(zed_shared=zed).start()
-    
-    # Pasamos None a los inicializadores para evitar que arranquen hilos nativos defectuosos
+    #vision = VisionZED(zed_shared=zed).start()
+
     zed = None
     vision = None
-    # ==============================================================
     
     # 5. Sender: único punto de escritura al ESP
     sender_local = SenderJetson(esp=esp).start()
@@ -89,3 +84,30 @@ if __name__ == "__main__":
     ).start()
 
     # El resto del código (DRAW_LOCAL e hilos de cierre) se queda exactamente igual...
+    # 9. Debug local — solo si DRAW_LOCAL está activo
+    #    Corre en el hilo principal porque OpenCV lo requiere
+    if DRAW_LOCAL:
+        from local_debug import run_debug
+        try:
+            run_debug(zed, vision, odo, rvr_cmd)
+        finally:
+            tracker.stop()
+            sender_local.stop()
+            vision.stop()
+            zed.stop()
+            odo.stop()
+            esp.close()
+    else:
+        # Sin debug: Flask ya corre en su hilo, el proceso vive hasta Ctrl+C
+        try:
+            threading.Event().wait()
+        except KeyboardInterrupt:
+            pass
+        finally:
+            tracker.stop()
+            sender_local.stop()
+            vision.stop()
+            zed.stop()
+            odo.stop()
+            esp.close()
+ 
