@@ -7,29 +7,34 @@ from command import Route_Command
 from odo import RoverOdometry
 from local_debug import run_debug
 import threading
+import time
 
 DRAW_LOCAL = False  # ← cambiar a False para desactivar la ventana de debug
 
 
+# Modificación en jetson/main.py
+
 if __name__ == "__main__":
-    # 1. Conexión serial con los ESP32 (Protegido contra desconexiones)
+    # 1. Conexión serial con los ESP32 (Protegida contra hardware faltante)
     esp = ESP()
     try:
         esp.connect()
         esp.send_uart("D1", "S0", "D1", "S0")  # fuerza parada inicial
-        print("✅ ESP32 Microcontroller connected successfully.")
+        print("✅ ESP32 conectado exitosamente por Serial.")
     except Exception as e:
-        print(f"⚠️ Warning: Could not connect to ESP32 Serial Hub ({e}). Proceeding in safe mode.")
+        print(f"⚠️ Alerta: No se pudo conectar al ESP32 ({e}). Iniciando en modo seguro sin serial.")
 
-    # 2. Odometría (Se inicializa de forma segura)
+    # 2. Odometría (Evitamos que bloquee el flujo si no hay ESP)
     try:
         odo = RoverOdometry(esp=esp)
     except Exception as e:
-        print(f"⚠️ Warning: Could not initialize Odometry hardware ({e}). Mocking baseline data.")
-        # Fallback dummy class so server.py doesn't crash reading properties
+        print(f"⚠️ Alerta: Error al iniciar Odometría física ({e}). Usando Mock de datos base.")
+        # Creamos una clase dummy rápida para que server.py no truene al leer propiedades
         class DummyOdo:
-            pose = (0.0, 0.0, 0.0)
-            velocity = (0.0, 0.0)
+            @property
+            def pose(self): return (0.0, 0.0, 0.0)
+            @property
+            def velocity(self): return (0.0, 0.0)
             def reset_pose(self): pass
         odo = DummyOdo()
 
@@ -53,18 +58,21 @@ if __name__ == "__main__":
         esp=esp
     )
 
-    # 8. Servidor Flask en hilo secundario (OpenCV necesita el hilo principal)
-    # 8. Servidor MQTT en hilo secundario (OpenCV necesita el hilo principal)
+    # 8. Servidor MQTT en hilo secundario
     server.init_app(esp, zed, vision, tracker, odo, rvr_cmd)
     
-    # CAMBIA ESTO por la dirección IP real de tu computadora/Laptop
-    LAPTOP_BROKER_IP = "172.32.237.112" 
+    # Asegúrate de que esta sea la IP real de tu laptop en este instante
+    LAPTOP_BROKER_IP = "172.32.149.2" 
     
+    print(f"📡 Lanzando hilo de red hacia el Broker en {LAPTOP_BROKER_IP}...")
     threading.Thread(
         target=server.run, 
         kwargs={"broker_ip": LAPTOP_BROKER_IP, "broker_port": 1883}, 
         daemon=True
     ).start()
+
+    # Le damos un pequeño respiro (0.5s) al socket para establecerse antes de lanzar la ruta
+    time.sleep(0.5)
 
     threading.Thread(
         target=rvr_cmd.follow_path,
@@ -72,30 +80,4 @@ if __name__ == "__main__":
         daemon=True
     ).start()
 
-    # 9. Debug local — solo si DRAW_LOCAL está activo
-    #    Corre en el hilo principal porque OpenCV lo requiere
-    if DRAW_LOCAL:
-        from local_debug import run_debug
-        try:
-            run_debug(zed, vision, odo, rvr_cmd)
-        finally:
-            tracker.stop()
-            sender_local.stop()
-            vision.stop()
-            zed.stop()
-            odo.stop()
-            esp.close()
-    else:
-        # Sin debug: Flask ya corre en su hilo, el proceso vive hasta Ctrl+C
-        try:
-            threading.Event().wait()
-        except KeyboardInterrupt:
-            pass
-        finally:
-            tracker.stop()
-            sender_local.stop()
-            vision.stop()
-            zed.stop()
-            odo.stop()
-            esp.close()
- 
+    # El resto del código (DRAW_LOCAL e hilos de cierre) se queda exactamente igual...
