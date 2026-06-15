@@ -39,12 +39,20 @@ class Receiver:
             print(f"HMI Receiver connection failed with code {rc}")
 
     def on_message(self, client, userdata, msg):
-        """Processes incoming data and safely updates variables using thread locks."""
+        """Processes incoming data safely separating text from JSON streams."""
         with self._lock:
             self._last_msg_time = time.time()
             self.is_stale = False
             
             try:
+                # 1. Handle raw text status topics BEFORE parsing JSON
+                if msg.topic == "rover/status":
+                    status_text = msg.payload.decode().strip()
+                    if status_text == "offline":
+                        self.is_stale = True
+                    return  # Exit early since this isn't JSON
+
+                # 2. Safely parse JSON for all other telemetry topics
                 payload = json.loads(msg.payload.decode())
                 
                 if msg.topic == "rover/odometry":
@@ -52,7 +60,6 @@ class Receiver:
                     self.velocity = (payload.get("v", 0.0), payload.get("omega", 0.0))
                     
                 elif msg.topic == "rover/sensors":
-                    # Adapt this mapping to match what your esp.get_sensor_state() structure sends
                     sensor_state = payload.get("rover_sensors", {})
                     self.pitch = sensor_state.get("pitch", 0.0)
                     self.heading = sensor_state.get("heading", 0.0)
@@ -61,13 +68,9 @@ class Receiver:
                 elif msg.topic == "rover/telemetry":
                     rover_state = payload.get("rover_state", {})
                     self._peso = rover_state.get("peso", 0.0)
-                    
-                elif msg.topic == "rover/status":
-                    if msg.payload.decode() == "offline":
-                        self.is_stale = True
 
             except Exception as e:
-                print(f"Error parsing topic {msg.topic}: {e}")
+                print(f"⚠️ Error parsing topic {msg.topic}: {e}")
 
     def _monitor_connection(self):
         """Background loop checking if the rover has stopped transmitting."""
