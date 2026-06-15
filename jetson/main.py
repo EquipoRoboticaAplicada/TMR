@@ -44,8 +44,8 @@ if __name__ == "__main__":
     # 4. Pipeline de visión
     #vision = VisionZED(zed_shared=zed).start()
 
-    zed = none
-    vision = none
+    zed = None
+    vision = None
     # 5. Sender: único punto de escritura al ESP
     sender_local = SenderJetson(esp=esp).start()
 
