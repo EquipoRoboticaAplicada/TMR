@@ -12,13 +12,26 @@ DRAW_LOCAL = False  # ← cambiar a False para desactivar la ventana de debug
 
 
 if __name__ == "__main__":
-    # 1. Conexión serial con los ESP32
+    # 1. Conexión serial con los ESP32 (Protegido contra desconexiones)
     esp = ESP()
-    esp.connect()
-    esp.send_uart("D1", "S0", "D1", "S0")  # fuerza parada inicial
+    try:
+        esp.connect()
+        esp.send_uart("D1", "S0", "D1", "S0")  # fuerza parada inicial
+        print("✅ ESP32 Microcontroller connected successfully.")
+    except Exception as e:
+        print(f"⚠️ Warning: Could not connect to ESP32 Serial Hub ({e}). Proceeding in safe mode.")
 
-    # 2. Odometría (inicia su propio hilo interno)
-    odo = RoverOdometry(esp=esp)
+    # 2. Odometría (Se inicializa de forma segura)
+    try:
+        odo = RoverOdometry(esp=esp)
+    except Exception as e:
+        print(f"⚠️ Warning: Could not initialize Odometry hardware ({e}). Mocking baseline data.")
+        # Fallback dummy class so server.py doesn't crash reading properties
+        class DummyOdo:
+            pose = (0.0, 0.0, 0.0)
+            velocity = (0.0, 0.0)
+            def reset_pose(self): pass
+        odo = DummyOdo()
 
     # 3. Cámara ZED
     zed = ZEDShared().start()
