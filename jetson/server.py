@@ -94,7 +94,7 @@ def telemetry_publisher_loop(client, rate_hz=10):
             
         time.sleep(interval)
 
-def run(broker_ip="172.32.237.112", broker_port=1883):
+def run(broker_ip="172.32.149.2", broker_port=1883):
     """Starts the MQTT loop and internal streaming threads instead of Flask app.run()."""
     
     # Initialize Client (v2 library compatibility)
