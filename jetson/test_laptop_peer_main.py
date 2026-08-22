@@ -1,101 +1,62 @@
-import sys
-import types
-import time
+import math
+import random
 import threading
+import time
+from jetson import server
 
-# 1. Mock 'pyzed' module workspace in memory
-pyzed_mock = types.ModuleType("pyzed")
-pyzed_mock.sl = types.ModuleType("sl")
-pyzed_mock.sl.Camera = lambda: None 
-sys.modules["pyzed"] = pyzed_mock
-sys.modules["pyzed.sl"] = pyzed_mock.sl
+# Target broker IP (Computer A - your Fedora laptop)
+BROKER_IP = "172.32.216.190"
+BROKER_PORT = 1883
 
-# 2. Mock out the hardware classes
-import connect
-import vision_zed
-import odo
-import main  # Import main module frame directly so we can patch its variables
 
-class MockESP:
-    def connect(self): print("[Mock] Serial Connection established.")
-    def send_uart(self, *args): pass 
-    def get_sensor_state(self):
-        return {"pitch": 5.2, "heading": 90.0, "terrain": "SMOOTH"}
-    def get_rover_state(self):
-        return {"peso": 120.5}
-    def close(self): print("[Mock] Serial Closed.")
+def dummy_telemetry_loop():
+    x, y, theta = 0.0, 0.0, 0.0
+    v, omega = 0.5, 0.1
+    pitch, roll, heading = 0.0, 0.0, 0.0
+    peso = 250.0
 
-class MockZEDShared:
-    def start(self):
-        print("[Mock] ZED Camera Thread started.")
-        return self
-    def stop(self): pass
+    print("Dummy telemetry generator running...")
+    while True:
+        # Simulate simple circular/forward movement
+        theta = (theta + 0.05) % (2 * math.pi)
+        x += 0.05 * math.cos(theta)
+        y += 0.05 * math.sin(theta)
 
-class MockVisionZED:
-    def __init__(self, zed_shared): pass
-    def start(self):
-        print("[Mock] Vision Object Tracking Pipeline running.")
-        return self
-    def stop(self): pass
+        pitch = round(5.0 * math.sin(time.time()), 2)
+        roll = round(3.0 * math.cos(time.time()), 2)
+        heading = round(math.degrees(theta), 2)
+        peso += random.uniform(-0.5, 0.5)
 
-# Inject dummy configurations
-connect.ESP = MockESP
-vision_zed.ZEDShared = MockZEDShared
-vision_zed.VisionZED = MockVisionZED
+        # 1. Update Odometry
+        server.update_odometry(x=round(x, 3), y=round(y, 3), theta=round(theta, 3), v=v, omega=omega)
 
-# 3. Dynamic Odometry Walk Simulator (Safely overriding properties)
-class MockOdometry(odo.RoverOdometry):
-    def __init__(self, esp):
-        # Initialize internal private variables to store the fake vectors
-        self._fake_pose = (0.0, 0.0, 0.0)      # x, y, theta
-        self._fake_velocity = (0.1, 0.01)     # v, omega
-        LAPTOP_BROKER_IP = "172.32.216.190" 
+        # 2. Update Sensors
+        server.update_sensors(pitch=pitch, roll=roll, heading=heading, terrain="SMOOTH")
 
-        threading.Thread(
-            target=server.run,
-            kwargs={"broker_ip": LAPTOP_BROKER_IP, "broker_port": 1883},
-            daemon=True,
-        ).start()
-                
-    # Override the read-only properties with custom dynamic getters
-    @property
-    def pose(self):
-        return self._fake_pose
+        # 3. Update Motors & Weight Telemetry
+        server.update_telemetry(
+            left_motors=[{"id": 1, "rpm": 120.0}, {"id": 2, "rpm": 120.0}],
+            right_motors=[{"id": 1, "rpm": 122.0}, {"id": 2, "rpm": 122.0}],
+            peso=round(peso, 2),
+        )
 
-    @property
-    def velocity(self):
-        return self._fake_velocity
+        time.sleep(0.1)  # 10 Hz
 
-    def _fake_walk(self):
-        x, y, theta = 0.0, 0.0, 0.0
-        while True:
-            x += 0.05
-            y += 0.02
-            theta = (theta + 0.03) % 6.28
-            self._fake_pose = (x, y, theta)
-            time.sleep(0.1) # Send state coordinate ticks at 10Hz
-            
-    def stop(self): pass
 
-odo.RoverOdometry = MockOdometry
+def main():
+    print(f"📡 Connecting to MQTT Broker at {BROKER_IP}:{BROKER_PORT}...")
+    
+    # Start MQTT server thread pointing to Computer A
+    server_thread = threading.Thread(
+        target=server.run,
+        kwargs={"broker_ip": BROKER_IP, "broker_port": BROKER_PORT},
+        daemon=True,
+    )
+    server_thread.start()
 
-# 4. Overwrite main's internal variable routing to point directly to localhost
-main.LAPTOP_BROKER_IP = "localhost"
-main.DRAW_LOCAL = False
+    # Start dummy data publishing loop
+    dummy_telemetry_loop()
+
 
 if __name__ == "__main__":
-    print("Bootstrapping local hardware simulation context on LOCALHOST...")
-    
-    # Re-run the structural block under our new clean parameters
-    import server
-    server.init_app(MockESP(), None, None, None, MockOdometry(None), None)
-    
-    print("Launching client stream to localhost:1883...")
-    server.run(broker_ip="localhost", broker_port=1883)
-    
-    # Keep the main process string completely awake
-    try:
-        while True:
-            time.sleep(1)
-    except KeyboardInterrupt:
-        print("\nStopping simulation.")
+    main()
