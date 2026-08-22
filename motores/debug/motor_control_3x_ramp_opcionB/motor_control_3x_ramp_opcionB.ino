@@ -24,11 +24,16 @@ unsigned int seq = 0;
 //const int ENC_A[3] = {  4, 16, 18 };
 //const int ENC_B[3] = {  5, 17, 19 };
 
+const int IN1[3] = { 13, 23, 26 };   // RPWM
+const int IN2[3] = { 14, 25, 27 };   // LPWM 
+const int ENC_A[3] = {  5, 17, 18 };
+const int ENC_B[3] = {  4, 16, 19 };
+
 // der
-const int IN1[3] = {14, 27, 23};  
-const int IN2[3] = {13, 26, 25};  
-const int ENC_A[3] = {4,  16, 18};
-const int ENC_B[3] = {5,  17, 19};
+//const int IN1[3] = {14, 27, 23};  
+//const int IN2[3] = {13, 26, 25};  
+//const int ENC_A[3] = {4,  16, 18};
+//const int ENC_B[3] = {5,  17, 19};
 
 // ── PWM ─────────────────────────────────────────────────────
 #define PWM_FREQ       20000   // Hz
@@ -340,27 +345,26 @@ void loop() {
   // ============================================================
   //  Paquete UART: ID, seq, rpm0, v0, rpm1, v1, rpm2, v2
   // ============================================================
-  Serial.print(ESP_ID); Serial.print(",");
-  Serial.print(seq++);
-
-  for (int i = 0; i < 3; i++) {
-    Serial.print(",");
-    Serial.print(motor[i].currentRPM, 2);
-    Serial.print(",");
-    Serial.print(motor[i].v_mps, 4);
-  }
-  Serial.println();
-
+//  Serial.print(ESP_ID); Serial.print(",");
+//  Serial.print(seq++);
+//
+//  for (int i = 0; i < 3; i++) {
+//    Serial.print(",");
+//    Serial.print(motor[i].currentRPM, 2);
+//    Serial.print(",");
+//    Serial.print(motor[i].v_mps, 4);
+//  }
+//  Serial.println();
   
   // ============================================================
   //  Diagnóstico (Serial Plotter)
   // ============================================================
-//  for (int i = 0; i < 3; i++) {
-//    Serial.print(" SP:");   Serial.print(motor[i].setpointRPM, 1);
-//    Serial.print(" PV:");   Serial.print(motor[i].currentRPM,  1);
-//    Serial.print(" PWM:");  Serial.print(motor[i].pwmPercent,  1);
-//  }
-//  Serial.println();
+  for (int i = 0; i < 3; i++) {
+    Serial.print(" SP:");   Serial.print(motor[i].setpointRPM, 1);
+    Serial.print(" PV:");   Serial.print(motor[i].currentRPM,  1);
+    Serial.print(" PWM:");  Serial.print(motor[i].pwmPercent,  1);
+  }
+  Serial.println();
 
   lastSampleMs = now;
 }
