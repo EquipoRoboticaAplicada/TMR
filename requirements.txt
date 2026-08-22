@@ -2,7 +2,6 @@ anyio==4.13.0
 argcomplete==3.6.3
 asttokens==3.0.1
 beautifulsoup4==4.15.0
-blivet @ file:///builddir/build/BUILD/python-blivet-3.14.1-build/blivet-3.14.1
 Brlapi==0.8.7
 certifi==2026.1.4
 cffi==2.0.0
@@ -69,7 +68,6 @@ pyenchant==3.3.0
 Pygments==2.19.1
 PyGObject==3.56.3
 pyinotify==0.9.6
-pykickstart @ file:///builddir/build/BUILD/pykickstart-3.69-build/pykickstart-3.69
 pyparsing==3.1.2
 pyparted==3.13.0
 pypresence==4.3.0
@@ -98,8 +96,6 @@ rpmautospec==0.8.4
 rpmautospec-core==0.1.5
 scapy==2.7.0
 scipy==1.16.2
-selinux @ file:///builddir/build/BUILD/libselinux-3.11-build/libselinux-3.11/src/dist/selinux-3.11-cp314-cp314-linux_x86_64.whl#sha256=e028f96b8a57c596eb2e91c08d937d711954cb0882a6552bf28ddeab938028e3
-sepolicy @ file:///builddir/build/BUILD/policycoreutils-3.11-build/selinux-3.11/python/sepolicy/dist/sepolicy-3.11-py3-none-any.whl#sha256=4215ac0439a505cdb35970cf16a590b4592d8a21f2bc6612e7a216c4490da2a3
 setools==4.6.0
 simpleline==1.9.0
 six==1.17.0
