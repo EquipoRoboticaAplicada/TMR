@@ -264,27 +264,31 @@ class ESP:
         with self._lock:
             return copy.deepcopy(self._sensor_state)
 
-    def send_uart(self, left_dir, left_rpm, right_dir, right_rpm):
-        for val in (left_dir, left_rpm, right_dir, right_rpm):
+    def send_uart(self, left_value, right_value):
+        """
+        Envía el setpoint de cada lado como un solo valor con signo
+        (+ = un sentido, - = el sentido contrario), en el formato
+        "S<valor>" que espera el .ino. Ya no se manda una línea de
+        dirección (D0/D1) separada de la magnitud.
+        """
+        for val in (left_value, right_value):
             assert isinstance(val, str), f"Tipo inválido: {val!r}"
 
         with self._lock:
             left  = self._ser_left
             right = self._ser_right
-            # print(f"Enviando UART → L: {left_rpm} | R: {right_rpm}") # DEBUG
+            # print(f"Enviando UART → L: {left_value} | R: {right_value}") # DEBUG
 
             try:
                 if left and left.is_open:
-                    left.write((left_dir  + "\n").encode())
-                    left.write((left_rpm  + "\n").encode())
+                    left.write((f"S{left_value}\n").encode())
             except serial.SerialException as e:
                 print(f"[send_uart] Error escribiendo a ESP: {e}")
                 self._ser_left = None
 
             try:
                 if right and right.is_open:
-                    right.write((right_dir + "\n").encode())
-                    right.write((right_rpm + "\n").encode())
+                    right.write((f"S{right_value}\n").encode())
             except serial.SerialException as e:
                 print(f"[send_uart] Error escribiendo a ESP_R: {e}")
                 self._ser_right = None
