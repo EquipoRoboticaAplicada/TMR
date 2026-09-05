@@ -16,7 +16,7 @@ import vision_zed
 import odo
 import main  # Import main module frame directly so we can patch its variables
 
-BROKER_IP = "148.238.2.83"
+BROKER_IP = "172.32.167.230"
 BROKER_PORT = 1883
 
 class MockESP:
