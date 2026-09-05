@@ -33,7 +33,7 @@ Crr = 0.20;              % coeficiente de resistencia al rodamiento
 
 % Mientras mayor sea Crr, mayor será el torque requerido por los motores.
 
-a = 0.20;                % aceleracion deseada [m/s^2]
+a = 0.20;                    % aceleracion deseada [m/s^2]
 
 FS = 2.5;                % factor de seguridad recomendado: 2 a 3
 

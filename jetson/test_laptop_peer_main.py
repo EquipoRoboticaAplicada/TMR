@@ -2,10 +2,10 @@ import math
 import random
 import threading
 import time
-from jetson import server
+import server
 
 # Target broker IP (Computer A - your Fedora laptop)
-BROKER_IP = "172.32.216.190"
+BROKER_IP = "148.238.2.83"
 BROKER_PORT = 1883
 
 

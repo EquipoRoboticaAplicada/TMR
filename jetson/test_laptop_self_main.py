@@ -16,6 +16,9 @@ import vision_zed
 import odo
 import main  # Import main module frame directly so we can patch its variables
 
+BROKER_IP = "148.238.2.83"
+BROKER_PORT = 1883
+
 class MockESP:
     def connect(self): print("[Mock] Serial Connection established.")
     def send_uart(self, *args): pass 
@@ -74,7 +77,7 @@ class MockOdometry(odo.RoverOdometry):
 odo.RoverOdometry = MockOdometry
 
 # 4. Overwrite main's internal variable routing to point directly to localhost
-main.LAPTOP_BROKER_IP = "localhost"
+main.LAPTOP_BROKER_IP = BROKER_IP
 main.DRAW_LOCAL = False
 
 if __name__ == "__main__":
@@ -85,7 +88,7 @@ if __name__ == "__main__":
     server.init_app(MockESP(), None, None, None, MockOdometry(None), None)
     
     print("Launching client stream to localhost:1883...")
-    server.run(broker_ip="localhost", broker_port=1883)
+    server.run(broker_ip=BROKER_IP, broker_port=BROKER_PORT)
     
     # Keep the main process string completely awake
     try:
