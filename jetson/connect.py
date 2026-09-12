@@ -336,9 +336,13 @@ def test_reception(poll_rate_hz: float = 2.0):
     esp = ESP()
     esp.connect()
     interval = 1.0 / poll_rate_hz
+    test_velocity = "20"  # Velocidad de prueba (RPM)
     print("Iniciando monitoreo de motores (Ctrl+C para detener)...\n")
     try:
         while True:
+            # Enviar velocidad constantemente para probar conexion bidireccional
+            esp.send_uart(test_velocity, test_velocity)
+            
             time.sleep(interval)
             state = esp.get_rover_state()
             for side in ("left_side", "right_side"):
@@ -352,6 +356,8 @@ def test_reception(poll_rate_hz: float = 2.0):
             print("-" * 50)
     except KeyboardInterrupt:
         print("\nMonitoreo finalizado.")
+        # Detener motores al salir
+        esp.send_uart("0", "0")
     finally:
         esp.close()
 
