@@ -151,27 +151,23 @@ class SenderJetson:
 
     def send_vision(self, rpm):
         """
-        Comando de vision.
-        Formato compatible con Arduino: S<valor>
+        Comando de vision: mismo RPM para ambos lados.
+        El valor se pasa como string a send_uart, que agrega el prefijo S.
         """
         rpm = max(-self.MAX_RPM, min(int(rpm), self.MAX_RPM))
-
-        payload = f"S{rpm}"
-
+        val = str(rpm)
         with self.lock:
-            self.latest_vision = payload
+            self.latest_vision = (val, val)
 
-    def send_route(self, rpm):
+    def send_route(self, left_rpm: int, right_rpm: int):
         """
-        Comando de ruta.
-        Formato compatible con Arduino: S<valor>
+        Comando de ruta con control diferencial.
+        left_rpm / right_rpm con signo: positivo = adelante, negativo = atras.
         """
-        rpm = max(-self.MAX_RPM, min(int(rpm), self.MAX_RPM))
-
-        payload = f"S{rpm}"
-
+        left_rpm  = max(-self.MAX_RPM, min(int(left_rpm),  self.MAX_RPM))
+        right_rpm = max(-self.MAX_RPM, min(int(right_rpm), self.MAX_RPM))
         with self.lock:
-            self.latest_route = payload
+            self.latest_route = (str(left_rpm), str(right_rpm))
 
     def _run(self):
         while not self.stop_event.is_set():
@@ -188,9 +184,10 @@ class SenderJetson:
                     self.latest_route = None
 
             if payload is not None:
-                # Se envía una sola velocidad con signo.
-                # El método send_uart debe aceptar este formato.
-                self.esp.send_uart(payload)
+                try:
+                    self.esp.send_uart(payload[0], payload[1])
+                except Exception as e:
+                    print(f"[SenderJetson] Error send_uart: {e}")
 
             time.sleep(0.005)
 

@@ -93,24 +93,19 @@ class Route_Command:
         ANGLE_TOLERANCE = 0.1   # rad — error angular antes de avanzar recto
         BASE_RPM        = 20
 
-        FWD  = "D1"
-        BWD  = "D0"
-        SRPM = f"S{BASE_RPM}"
-        STOP = "S0"
-
         def go_forward():
-            self.sender.send_route(FWD, SRPM, FWD, SRPM)
+            self.sender.send_route(BASE_RPM, BASE_RPM)
 
         def turn_left():
             # Rueda derecha adelante, rueda izquierda atrás ===> gira a la izquierda
-            self.sender.send_route(BWD, SRPM, FWD, SRPM)
+            self.sender.send_route(-BASE_RPM, BASE_RPM)
 
         def turn_right():
             # Rueda izquierda adelante, rueda derecha atrás ===> gira a la derecha
-            self.sender.send_route(FWD, SRPM, BWD, SRPM)
+            self.sender.send_route(BASE_RPM, -BASE_RPM)
 
         def stop():
-            self.sender.send_route(FWD, STOP, FWD, STOP)
+            self.sender.send_route(0, 0)
 
         was_tracking = False
 
