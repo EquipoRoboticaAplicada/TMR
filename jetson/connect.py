@@ -331,8 +331,13 @@ class ESP:
             self._ser_sensores = None
         print("🛑 Conexiones seriales cerradas.\n")
 
+#----------------------------------------------------
+#----------------------------------------------------
+#COMENAR LA SIGUENTE SECCION (PRUEBAS DE RECEPCION)
+#----------------------------------------------------
+#----------------------------------------------------
 
-def test_reception(poll_rate_hz: float = 2.0):
+def test_reception(poll_rate_hz: float = 2.0): 
     esp = ESP()
     esp.connect()
     interval = 1.0 / poll_rate_hz
