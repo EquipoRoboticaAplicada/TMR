@@ -17,10 +17,10 @@ class ESP:
         self._ser_sensores  = None # Sensores
         self._lock          = threading.Lock()
 
-        # Estado del rover (odometría)
+        # Estado del rover (odometria): 3 motores por lado
         self._rover_state = {
-            "left_side":  {"seq": 0, "motors": [{"rpm": 0.0, "m/s": 0.0} for _ in range(2)]},
-            "right_side": {"seq": 0, "motors": [{"rpm": 0.0, "m/s": 0.0} for _ in range(2)]},
+            "left_side":  {"seq": 0, "motors": [{"rpm": 0.0, "m/s": 0.0} for _ in range(3)]},
+            "right_side": {"seq": 0, "motors": [{"rpm": 0.0, "m/s": 0.0} for _ in range(3)]},
             "last_update": 0.0
         }
 
@@ -202,30 +202,29 @@ class ESP:
 
     def _parse_esp_line_m(self, line: str):
         """
-        Formato: ESP_L/R, seq, rpm0, v0, rpm1, v1, rpm2, v2
+        Formato esperado: ESP_L/R,seq,rpm0,v0[,rpm1,v1[,rpm2,v2]]
+        Minimo 4 campos (1 motor), maximo 8 campos (3 motores).
         """
         if not line:
             return
 
         try:
-            # print(line) # DEBUG
             parts = line.strip().split(',')
 
-            if len(parts) != 4:
+            # Minimo: header, seq, rpm0, v0
+            if len(parts) < 4 or (len(parts) - 2) % 2 != 0:
                 return
 
-            try:
-                header = parts[0]
-                seq    = int(parts[1])
-                m_data = [
-                    {"rpm": float(parts[2]), "m/s": float(parts[3])},
-                   # {"rpm": float(parts[4]), "m/s": float(parts[5])},
-                    # {"rpm": float(parts[6]), "m/s": float(parts[7])}, # Solo 2 motores por lado, no 3. Encoders muertos. 
-                ]
+            header = parts[0]
+            seq    = int(parts[1])
 
-            except (ValueError, IndexError):
-                print("[_parse_esp_line_m] Error.\n")
-                return
+            # Parsea todos los pares (rpm, m/s) presentes
+            m_data = []
+            for i in range(2, len(parts), 2):
+                m_data.append({
+                    "rpm": float(parts[i]),
+                    "m/s": float(parts[i + 1])
+                })
 
             with self._lock:
                 if header == "ESP_L":
@@ -237,15 +236,14 @@ class ESP:
                         {"seq": seq, "motors": m_data}
                     )
                 else:
-                    print("Header: ESP_L/R, no reconocido.\n")
-                    return  # Header desconocido, ignorar
+                    return
 
                 self._rover_state["last_update"] = time.time()
 
-        except ValueError as e:
-            print(f"[parse] ValueError en: {repr(line)} → {e}")
+        except (ValueError, IndexError):
+            pass
         except Exception as e:
-            print(f"[parse] Error inesperado: {repr(line)} → {e}")
+            print(f"[_parse_esp_line_m] Error: {repr(line)} -> {e}")
 
     def get_rover_state(self) -> dict:
         """
@@ -332,3 +330,31 @@ class ESP:
             self._ser_right = None
             self._ser_sensores = None
         print("🛑 Conexiones seriales cerradas.\n")
+
+
+def test_reception(poll_rate_hz: float = 2.0):
+    esp = ESP()
+    esp.connect()
+    interval = 1.0 / poll_rate_hz
+    print("Iniciando monitoreo de motores (Ctrl+C para detener)...\n")
+    try:
+        while True:
+            time.sleep(interval)
+            state = esp.get_rover_state()
+            for side in ("left_side", "right_side"):
+                seq = state[side]["seq"]
+                motors = state[side]["motors"]
+                motors_info = ", ".join(
+                    f"M{i}: {m['rpm']:.1f} RPM ({m['m/s']:.3f} m/s)"
+                    for i, m in enumerate(motors)
+                )
+                print(f"[{side}] seq={seq} | {motors_info}")
+            print("-" * 50)
+    except KeyboardInterrupt:
+        print("\nMonitoreo finalizado.")
+    finally:
+        esp.close()
+
+
+if __name__ == "__main__":
+    test_reception()

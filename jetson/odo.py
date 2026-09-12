@@ -62,19 +62,30 @@ class RoverOdometry:
 
     def _update_pose(self):
         """
-        1. Obtiene el rover_state más reciente desde ESP.
-        2. Integra la posición con modelo diferencial:
-
-            v     = (v_l + v_r) / 2      [m/s]
-            omega = (v_r - v_l) / L      [rad/s]
-            x    += v · cos(θ) · dt
-            y    += v · sin(θ) · dt
-            θ    += omega · dt
+        1. Obtiene el rover_state mas reciente desde ESP.
+        2. Integra la posicion con modelo diferencial (punto medio).
         """
         new_state = self.esp.get_rover_state()
-        print(f"[RoverOdometry] Nuevo rover_state: {new_state}") # DEBUG
+
         with self._state_lock:
             self._state = new_state
+            m_l = self._state["left_side"]["motors"]
+            m_r = self._state["right_side"]["motors"]
+
+            # Promedio ponderado si hay 3 motores, fallback al primero disponible
+            if len(m_l) >= 3:
+                v_l = m_l[0]["m/s"] * 0.1 + m_l[1]["m/s"] * 0.8 + m_l[2]["m/s"] * 0.1
+            elif len(m_l) > 0:
+                v_l = m_l[0]["m/s"]
+            else:
+                v_l = 0.0
+
+            if len(m_r) >= 3:
+                v_r = m_r[0]["m/s"] * 0.1 + m_r[1]["m/s"] * 0.8 + m_r[2]["m/s"] * 0.1
+            elif len(m_r) > 0:
+                v_r = m_r[0]["m/s"]
+            else:
+                v_r = 0.0
 
         now = time.time()
         with self._pose_lock:
@@ -83,21 +94,17 @@ class RoverOdometry:
                 return
             self._last_pose_update = now
 
-            m_l = self._state["left_side"]["motors"]
-            m_r = self._state["right_side"]["motors"]
-
-            # SOLUCIÓN: Promedio ponderado. 
-            # Damos 80% de confianza al motor central (índice 1) porque no derrapa, 
-            # y 10% a los extremos para no descartarlos por completo si el centro pierde tracción.
-            v_l = (m_l[0]["m/s"]) #+ (m_l[1]["m/s"] * 0.3) # + (m_l[2]["m/s"] * 0.1)
-            v_r = (m_r[0]["m/s"]) #+ (m_r[1]["m/s"] * 0.2) # + (m_r[2]["m/s"] * 0.1)
-            print(f"[RoverOdometry] v_l: {v_l:.3f} m/s, v_r: {v_r:.3f} m/s") # DEBUG
-
             v = (v_l + v_r) / 2.0
             omega = (v_r - v_l) / self.L
-            self._x     += v * math.cos(self._theta) * dt
-            self._y     += v * math.sin(self._theta) * dt
-            self._theta += omega * dt
+
+            delta_theta = omega * dt
+            theta_mid = self._theta + delta_theta / 2.0
+            self._x     += v * math.cos(theta_mid) * dt
+            self._y     += v * math.sin(theta_mid) * dt
+            self._theta = math.atan2(
+                math.sin(self._theta + delta_theta),
+                math.cos(self._theta + delta_theta)
+            )
 
     # ------------------------------------------------------------------ #
     #  API pública                                                         #
@@ -111,20 +118,25 @@ class RoverOdometry:
 
     @property
     def velocity(self) -> tuple:
-        """Retorna (v_lineal [m/s], omega [rad/s]) instantáneos."""
+        """Retorna (v_lineal [m/s], omega [rad/s]) instantaneos."""
         with self._state_lock:
-            v_l = self._state["left_side"]["motors"][0]["m/s"]
-            v_r = self._state["right_side"]["motors"][0]["m/s"]
+            m_l = self._state["left_side"]["motors"]
+            m_r = self._state["right_side"]["motors"]
+            v_l = m_l[0]["m/s"] if len(m_l) > 0 else 0.0
+            v_r = m_r[0]["m/s"] if len(m_r) > 0 else 0.0
         return (v_l + v_r) / 2.0, (v_r - v_l) / self.L
 
     def motor_speed(self, side: str, motor_index: int = 0) -> float:
         """
-        Retorna la velocidad en m/s de un motor específico.
+        Retorna la velocidad en m/s de un motor especifico.
         side        : "left_side" o "right_side"
-        motor_index : 0 (adelante), 1 (en medio), 2 (atrás)
+        motor_index : 0 (adelante), 1 (en medio), 2 (atras)
         """
         with self._state_lock:
-            return self._state[side]["motors"][motor_index]["m/s"]
+            motors = self._state[side]["motors"]
+            if 0 <= motor_index < len(motors):
+                return motors[motor_index]["m/s"]
+            return 0.0
 
     def reset_pose(self):
         with self._pose_lock:
@@ -132,9 +144,8 @@ class RoverOdometry:
             self._last_pose_update = time.time()   # ← bajo el mismo lock
 
     def stop(self):
-        # Enviar comando de parada explícito
         try:
-            self.esp.send_uart("D1", "S0", "D1", "S0")
+            self.esp.send_uart("0", "0")
         except Exception:
             pass
         self._stop_event.set()
