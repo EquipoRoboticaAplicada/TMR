@@ -86,41 +86,27 @@ class ImgProcessorJetson:
 
             # Lógica de control (solo durante tracking)
             if self._tracking:
+
                 if detected and frame_w and frame_h:
+
                     turn = calc_turn_x(cx, frame_w)
 
-                    if (not mode_rotate) and (cy >= frame_h * Y_TRIGGER):
-                        mode_rotate = True
-                    elif mode_rotate and (cy < frame_h * Y_HYST):
-                        mode_rotate = False
+                    # Si el objeto está centrado
+                    if turn == 0.0:
 
-                    if mode_rotate:
-                        rot = 20 + 20 * abs(turn)
-                        if turn == 0.0:
-                            left_rpm = right_rpm = 0
-                            dir_left = dir_right = 1
-                            self._sender.send_vision(0, 0, dir_left, dir_right)
-                            self._sender.esp.act_arm()
-                            self._sender.esp.wait_for_peso_change()
-                            command_send_counter = 0
-                        elif turn > 0:
-                            left_rpm = right_rpm = rot
-                            dir_left, dir_right  = 1, 0
-                        else:
-                            left_rpm = right_rpm = rot
-                            dir_left, dir_right  = 0, 1
+                        self._sender.send_vision(0)
+
+                        self._sender.esp.act_arm()
+                        self._sender.esp.wait_for_peso_change()
+
                     else:
-                        left_rpm = right_rpm = APPROACH_RPM
-                        dir_left = dir_right = 1
+                        # No podemos girar con una sola velocidad.
+                        # Por seguridad, detenemos el rover.
+                        self._sender.send_vision(0)
 
-                command_send_counter += 1
-                if command_send_counter >= COMMAND_SEND_EVERY:
-                    self._sender.send_vision(
-                        clamp_rpm(left_rpm),
-                        clamp_rpm(right_rpm),
-                        dir_left, dir_right
-                    )
-                    command_send_counter = 0
+                else:
+                    # Si se pierde temporalmente el objeto, detenerse
+                    self._sender.send_vision(0)
 
             time.sleep(0.01)
 
@@ -148,68 +134,71 @@ class SenderJetson:
         """
         self.esp = esp
 
-        self.lock          = threading.Lock()
-        self.latest_vision = None   # puesto por send_vision() — ImgProcessorJetson
-        self.latest_route  = None   # puesto por send_route()  — Route_Command
-        self.stop_event    = threading.Event()
-        self.thread        = threading.Thread(target=self._run, daemon=True)
+        self.lock = threading.Lock()
+
+        self.latest_vision = None
+        self.latest_route = None
+
+        self.stop_event = threading.Event()
+        self.thread = threading.Thread(
+            target=self._run,
+            daemon=True
+        )
 
     def start(self):
         self.thread.start()
         return self
 
-    def send_vision(self, left_rpm, right_rpm, dir_left, dir_right):
-        """Comando de visión (mayor prioridad)."""
-        left_rpm  = max(0, min(int(left_rpm),  self.MAX_RPM))
-        right_rpm = max(0, min(int(right_rpm), self.MAX_RPM))
-        payload = {
-            "left_dir":  f"D{int(dir_left)}",
-            "left_rpm":  f"S{left_rpm}",
-            "right_dir": f"D{int(dir_right)}",
-            "right_rpm": f"S{right_rpm}",
-        }
+    def send_vision(self, rpm):
+        """
+        Comando de vision.
+        Formato compatible con Arduino: S<valor>
+        """
+        rpm = max(-self.MAX_RPM, min(int(rpm), self.MAX_RPM))
+
+        payload = f"S{rpm}"
+
         with self.lock:
             self.latest_vision = payload
 
-    def send_route(self, left_dir: str, left_rpm: str, right_dir: str, right_rpm: str):
-        """Comando de ruta (menor prioridad). Formato: 'D1'/'D0' y 'S<n>'."""
-        payload = {
-            "left_dir":  left_dir,
-            "left_rpm":  left_rpm,
-            "right_dir": right_dir,
-            "right_rpm": right_rpm,
-        }
+    def send_route(self, rpm):
+        """
+        Comando de ruta.
+        Formato compatible con Arduino: S<valor>
+        """
+        rpm = max(-self.MAX_RPM, min(int(rpm), self.MAX_RPM))
+
+        payload = f"S{rpm}"
+
         with self.lock:
             self.latest_route = payload
 
     def _run(self):
         while not self.stop_event.is_set():
+
             payload = None
 
             with self.lock:
                 if self.latest_vision is not None:
-                    # Prioridad 1: visión
                     payload = self.latest_vision
                     self.latest_vision = None
+
                 elif self.latest_route is not None:
-                    # Prioridad 2: ruta autónoma
                     payload = self.latest_route
                     self.latest_route = None
 
-            if payload:
-                # print(f"[SenderJetson] Enviando comando: {payload}") # DEBUG
-                self.esp.send_uart(
-                    payload["left_dir"],
-                    payload["left_rpm"],
-                    payload["right_dir"],
-                    payload["right_rpm"],
-                )
+            if payload is not None:
+                # Se envía una sola velocidad con signo.
+                # El método send_uart debe aceptar este formato.
+                self.esp.send_uart(payload)
 
             time.sleep(0.005)
 
     def stop(self):
         self.stop_event.set()
-        self.thread.join(timeout=1.0)
+
+        if self.thread is not None:
+            self.thread.join(timeout=1.0)
 
 
 # -----------------------------------------------------------
