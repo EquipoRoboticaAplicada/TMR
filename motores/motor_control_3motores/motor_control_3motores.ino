@@ -242,7 +242,9 @@ void loop() {
 
     Serial.print(ESP_ID); Serial.print(",");
     Serial.print(seq++); Serial.print(",");
-    Serial.print(PV[0]); Serial.print(",");
+    Serial.print("M0: "); Serial.print(PV[0], 1); Serial.print(" RPM | ");
+    Serial.print("M1: "); Serial.print(PV[1], 1); Serial.print(" RPM | ");
+    Serial.print("M2: "); Serial.print(PV[2], 1); Serial.println(" RPM");
     Serial.println(v0_mps, 4);
   }
 }
