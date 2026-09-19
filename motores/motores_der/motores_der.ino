@@ -14,7 +14,7 @@ const int ENC_B[3] = {5,  17, 19};
 const int PWM_MAX = (1 << PWM_RESOLUTION) - 1;
 
 const float PWM_MIN         = 20.0;
-const float GEAR_RATIO      = 56.25;
+const float GEAR_RATIO      = 262;
 const int   PULSES_PER_REV  = 16;
 const int   CPR_OUTPUT      = PULSES_PER_REV * 4 * GEAR_RATIO; // 3600
 
@@ -24,9 +24,9 @@ const unsigned long DIR_CHANGE_HOLD_MS = 120;
 const float WHEEL_DIAM_M = 0.17f;
 const float WHEEL_CIRC_M = 3.14159265f * WHEEL_DIAM_M;
 
-float Kp[3] = {1.2f, 1.2f, 1.2f};
-float Ki[3] = {0.015f, 0.015f, 0.015f};
-float Kd[3] = {0.25f, 0.25f, 0.25f};
+float Kp[3] = {0.0f, 1.0f, 0.0f};
+float Ki[3] = {0.0f, 0.0f, 0.0f};
+float Kd[3] = {0.f, 0.f, 0.0f};
 const float INTEGRAL_MAX = 200.0;
 
 const unsigned long CMD_TIMEOUT_MS = 400;
@@ -321,17 +321,17 @@ void loop() {
 //      for (int i = 0; i < 3; i++) {
 //        Serial.print(",");
 //        Serial.print(motor[i].currentRPM, 2);
-//        Serial.print(",");
+//        Serial.print(",");z
 //        Serial.print(v_mps[i], 4);
 //      }
 //      Serial.println();
 
       // Diagnóstico
-      for(int i = 0; i < 3; i++)
+      for(int i = 0; i < 1; i++)
       {
         Serial.print(" SP:"); Serial.print(motor[i].setpointRPM);
         Serial.print(" PV:"); Serial.print(motor[i].currentRPM);
-        Serial.print(" ERR:"); Serial.print(motor[i].errorSum);
+        Serial.print(" ERR:"); Serial.print(motor[i].error);
         Serial.print(" PWM:"); Serial.print(motor[i].pwmPercent);
       }
       Serial.println();

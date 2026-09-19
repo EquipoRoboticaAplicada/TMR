@@ -9,15 +9,19 @@
       comandos "D"/"S" y trama de salida "ID,seq,...".
 
   Conexiones (ajusta si tu cableado difiere):
-    Motor   IN1(RPWM)  IN2(LPWM)   ENC_A   ENC_B
-      0        14         13          4       5
-      1        27         26         16      17
-      2        23         25         18      19
+    Motor   IN1(RPWM)  IN2(LPWM)   ENC_A   ENC_B   R_EN   L_EN
+      0        14         13          4       5      21     22
+      1        27         26         16      17      32     33
+      2        23         25         18      19      15      2
 
-  Nota: al igual que en motores_der.ino, se asume que R_EN/L_EN de los
-  IBT-2 están habilitados por hardware (atados a VCC). Si tu montaje usa
-  pines de enable independientes, agrégalos y ponlos en HIGH en setup(),
-  como hacía motor_control_encoder_ibt2_2 con R_EN/L_EN.
+  Nota: R_EN y L_EN de cada IBT-2 se manejan como salidas digitales
+  simples (sin PWM) y se ponen en HIGH en setup() para activar los
+  drivers, como hacía motor_control_encoder_ibt2_2. Ya no deben ir
+  atados a VCC: conecta cada pin de enable de la ESP32 al R_EN/L_EN
+  correspondiente. GPIO15 y GPIO2 son pines de arranque (strapping) de
+  la ESP32; funcionan bien como salida una vez iniciada, pero si algún
+  día tienes problemas al programar o arrancar, cámbialos por otros
+  libres.
 
   --------------------------------------------------------------------
   Comandos por Serial (buffer de línea de motores_der.ino, dirección
@@ -48,6 +52,10 @@ const int IN1[3] = {14, 27, 23};   // RPWM
 const int IN2[3] = {13, 26, 25};   // LPWM
 const int ENC_A[3] = {4, 16, 18};
 const int ENC_B[3] = {5, 17, 19};
+
+// Pines de habilitación de cada IBT-2 (salidas digitales, HIGH = activo)
+const int R_EN[3] = {21, 32, 15};
+const int L_EN[3] = {22, 33, 2};
 
 // ---------- PWM (LEDC) ----------
 // Mismos parámetros que motor_control_encoder_ibt2_2 para conservar el
@@ -160,6 +168,15 @@ void setup() {
   for (int i = 0; i < 3; i++) {
     ledcAttach(IN1[i], PWM_FREQ, PWM_RES);
     ledcAttach(IN2[i], PWM_FREQ, PWM_RES);
+    ledcWrite(IN1[i], 0);
+    ledcWrite(IN2[i], 0);
+
+    // Habilita el driver hasta que el PWM ya está en 0 para que el
+    // motor no arranque con un pulso inesperado.
+    pinMode(R_EN[i], OUTPUT);
+    pinMode(L_EN[i], OUTPUT);
+    digitalWrite(R_EN[i], HIGH);
+    digitalWrite(L_EN[i], HIGH);
 
     pinMode(ENC_A[i], INPUT_PULLUP);
     pinMode(ENC_B[i], INPUT_PULLUP);
