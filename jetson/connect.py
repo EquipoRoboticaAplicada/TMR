@@ -341,7 +341,7 @@ def test_reception(poll_rate_hz: float = 2.0):
     esp = ESP()
     esp.connect()
     interval = 1.0 / poll_rate_hz
-    test_velocity = "20"  # Velocidad de prueba (RPM)
+    test_velocity = "10"  # Velocidad de prueba (RPM)
     print("Iniciando monitoreo de motores (Ctrl+C para detener)...\n")
     try:
         while True:
