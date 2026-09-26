@@ -9,19 +9,16 @@
       comandos "D"/"S" y trama de salida "ID,seq,...".
 
   Conexiones (ajusta si tu cableado difiere):
-    Motor   IN1(RPWM)  IN2(LPWM)   ENC_A   ENC_B   R_EN   L_EN
-      0        14         13          4       5      21     22
-      1        27         26         16      17      32     33
-      2        23         25         18      19      15      2
+    Motor   IN1(RPWM)  IN2(LPWM)   ENC_A   ENC_B
+      0        14         13          4       5
+      1        27         26         16      17
+      2        23         25         18      19
 
   Nota: R_EN y L_EN de cada IBT-2 se manejan como salidas digitales
   simples (sin PWM) y se ponen en HIGH en setup() para activar los
-  drivers, como hacía motor_control_encoder_ibt2_2. Ya no deben ir
-  atados a VCC: conecta cada pin de enable de la ESP32 al R_EN/L_EN
+  drivers. Conecta cada pin de enable de la ESP32 al R_EN/L_EN
   correspondiente. GPIO15 y GPIO2 son pines de arranque (strapping) de
-  la ESP32; funcionan bien como salida una vez iniciada, pero si algún
-  día tienes problemas al programar o arrancar, cámbialos por otros
-  libres.
+  la ESP32; funcionan bien como salida una vez iniciada.
 
   --------------------------------------------------------------------
   Comandos por Serial (buffer de línea de motores_der.ino, dirección
@@ -36,20 +33,19 @@
   motor_control_encoder_ibt2_2 (PID con salida con signo, sin mapeo a
   porcentaje ni PWM mínimo).
 
-  Trama de salida (cada SAMPLE_TIME ms), formato exacto que espera
-  connect.py (_parse_esp_line_m, que exige 4 campos separados por coma):
-    ESP_R,seq,rpm0,v0
+  Trama de salida (cada SAMPLE_TIME ms), formato que espera
+  connect.py (_parse_esp_line_m, pares rpm/v dinámicos):
+    ESP_R,seq,rpm0,v0,rpm1,v1,rpm2,v2
   ESP_ID se dejó como "ESP_R" porque connect.py identifica el puerto
-  buscando líneas que empiecen con "ESP_L" o "ESP_R". El PID de los 3
-  motores sigue corriendo igual; sólo se reporta la telemetría (rpm y
-  m/s) del motor 0, que es lo único que connect.py lee.
+  buscando líneas que empiecen con "ESP_L" o "ESP_R". Se reportan los
+  3 motores (rpm y m/s de cada uno).
 */
 
-const char* ESP_ID = "ESP_R"; // connect.py identifica el puerto buscando "ESP_L"/"ESP_R" al inicio de línea
+const char* ESP_ID = "ESP_L"; // connect.py identifica el puerto buscando "ESP_L"/"ESP_R" al inicio de línea
 
 // ---------- Pines (uno por motor) ----------
-const int IN1[3] = {14, 27, 23};   // RPWM
-const int IN2[3] = {13, 26, 25};   // LPWM
+const int IN1[3] = {13, 26, 25};   // IN2 originales pasaron a ser IN1
+const int IN2[3] = {14, 27, 23};   // IN1 originales pasaron a ser IN2
 const int ENC_A[3] = {4, 16, 18};
 const int ENC_B[3] = {5, 17, 19};
 
@@ -68,8 +64,8 @@ const float GEAR_RATIO      = 262;   // relación de reducción de la caja
 const int   PULSES_PER_REV  = 16;    // cuentas del encoder por vuelta del motor
 const float PULSES_PER_OUTPUT_REV = PULSES_PER_REV * GEAR_RATIO;
 
-// Diámetro de rueda: sólo se usa para reportar m/s del motor 0, como
-// espera connect.py (_parse_esp_line_m). Ajusta al diámetro real.
+// Diámetro de rueda: se usa para calcular m/s de los 3 motores.
+// Ajusta al diámetro real.
 const float WHEEL_DIAM_M = 0.17f;
 const float WHEEL_CIRC_M = 3.14159265f * WHEEL_DIAM_M;
 
@@ -235,16 +231,17 @@ void loop() {
     }
 
     // ---- Trama de salida: formato que espera connect.py (_parse_esp_line_m)
-    // ESP_ID,seq,rpm0,v0 — SIEMPRE 4 campos (el parser descarta cualquier
-    // línea que no tenga exactamente 4). Sólo se reporta el motor 0; el
-    // control PID de los 3 motores sigue corriendo internamente igual.
-    float v0_mps = (PV[0] / 60.0) * WHEEL_CIRC_M;
-
+    // ESP_ID,seq,rpm0,v0,rpm1,v1,rpm2,v2  (8 campos, 3 motores)
+    // El parser acepta de 4 a 8 campos en pares (rpm, m/s).
     Serial.print(ESP_ID); Serial.print(",");
-    Serial.print(seq++); Serial.print(",");
-    Serial.print("M0: "); Serial.print(PV[0], 1); Serial.print(" RPM | ");
-    Serial.print("M1: "); Serial.print(PV[1], 1); Serial.print(" RPM | ");
-    Serial.print("M2: "); Serial.print(PV[2], 1); Serial.println(" RPM");
-    Serial.println(v0_mps, 4);
+    Serial.print(seq++);
+    for (int i = 0; i < 3; i++) {
+      float v_mps = (PV[i] / 60.0) * WHEEL_CIRC_M;
+      Serial.print(",");
+      Serial.print(PV[i], 2);
+      Serial.print(",");
+      Serial.print(v_mps, 4);
+    }
+    Serial.println();
   }
 }
