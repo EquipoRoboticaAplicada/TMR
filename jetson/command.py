@@ -91,7 +91,7 @@ class Route_Command:
     def follow_path(self, rover_odometry):
         DIST_TOLERANCE  = 0.2   # m   — distancia para considerar que se llegó al punto
         ANGLE_TOLERANCE = 0.1   # rad — error angular antes de avanzar recto
-        BASE_RPM        = 20
+        BASE_RPM        = 5
 
         def go_forward():
             self.sender.send_route(BASE_RPM, BASE_RPM)

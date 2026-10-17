@@ -337,35 +337,35 @@ class ESP:
 #----------------------------------------------------
 #----------------------------------------------------
 
-#    def test_reception(poll_rate_hz: float = 2.0): 
-#       esp = ESP()
-#        esp.connect()
-#        interval = 1.0 / poll_rate_hz
-#        test_velocity = "10"  # Velocidad de prueba (RPM)
-#        print("Iniciando monitoreo de motores (Ctrl+C para detener)...\n")
-#        try:
-#            while True:
-#                # Enviar velocidad constantemente para probar conexion bidireccional
-#                esp.send_uart(test_velocity, test_velocity)
-#                
-#                time.sleep(interval)
-#                state = esp.get_rover_state()
-#                for side in ("left_side", "right_side"):
-#                    seq = state[side]["seq"]
-#                    motors = state[side]["motors"]
-#                    motors_info = ", ".join(
-#                        f"M{i}: {m['rpm']:.1f} RPM ({m['m/s']:.3f} m/s)"
-#                        for i, m in enumerate(motors)
-#                    )
-#                    print(f"[{side}] seq={seq} | {motors_info}")
-#                print("-" * 50)
-#        except KeyboardInterrupt:
-#            print("\nMonitoreo finalizado.")
-#            # Detener motores al salir
-#            esp.send_uart("0", "0")
-#        finally:
-#            esp.close()
+def test_reception(poll_rate_hz: float = 2.0): 
+    esp = ESP()
+    esp.connect()
+    interval = 1.0 / poll_rate_hz
+    test_velocity = "0"  # Velocidad de prueba (RPM)
+    print("Iniciando monitoreo de motores (Ctrl+C para detener)...\n")
+    try:
+        while True:
+            # Enviar velocidad constantemente para probar conexion bidireccional
+            esp.send_uart(test_velocity, test_velocity)
+            
+            time.sleep(interval)
+            state = esp.get_rover_state()
+            for side in ("left_side", "right_side"):
+                seq = state[side]["seq"]
+                motors = state[side]["motors"]
+                motors_info = ", ".join(
+                    f"M{i}: {m['rpm']:.1f} RPM ({m['m/s']:.3f} m/s)"
+                    for i, m in enumerate(motors)
+                )
+                print(f"[{side}] seq={seq} | {motors_info}")
+            print("-" * 50)
+    except KeyboardInterrupt:
+        print("\nMonitoreo finalizado.")
+        # Detener motores al salir
+        esp.send_uart("0", "0")
+    finally:
+        esp.close()
 
 
-#    if __name__ == "__main__":
-#        test_reception()
+if __name__ == "__main__":
+    test_reception()

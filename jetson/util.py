@@ -126,7 +126,7 @@ class ImgProcessorJetson:
 
 class SenderJetson:
 
-    MAX_RPM = 30
+    MAX_RPM = 10
 
     def __init__(self, esp):
         """
@@ -212,7 +212,7 @@ def calc_turn_x(cx, frame_width, deadband_px=50):
     return max(-1.0, min(1.0, turn))
 
 
-def clamp_rpm(rpm, min_rpm=20):
+def clamp_rpm(rpm, min_rpm=5):
     if rpm < min_rpm:
         return 0
     return int(rpm)
