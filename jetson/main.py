@@ -19,7 +19,7 @@ if __name__ == "__main__":
     esp = ESP()
     try:
         esp.connect()
-        esp.send_uart("D1", "S0", "D1", "S0")  # fuerza parada inicial
+        esp.send_uart("0", "0")  # fuerza parada inicial
         print("✅ ESP32 conectado exitosamente por Serial.")
     except Exception as e:
         print(f"⚠️ Alerta: No se pudo conectar al ESP32 ({e}). Iniciando en modo seguro sin serial.")
@@ -38,8 +38,12 @@ if __name__ == "__main__":
             def reset_pose(self): pass
         odo = DummyOdo()
 
-    print("📷 Inicializando Cámara ZED...")
-    zed = ZEDShared().start()
+    try:
+        print("📷 Inicializando Cámara ZED...")
+        zed = ZEDShared().start()
+    except Exception as e: 
+        print("Warning: Cámara ZED no encontrada!")
+        zed = None
     
     # CRUCIAL: Le damos 3 segundos exactos a C++ para abrir la cámara
     # y evitar que choque con el arranque de los hilos de Python.
