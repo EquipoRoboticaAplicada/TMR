@@ -71,7 +71,7 @@ if __name__ == "__main__":
     server.init_app(esp, zed, vision, tracker, odo, rvr_cmd)
     
     # Asegúrate de que esta sea la IP real de tu laptop en este instante
-    LAPTOP_BROKER_IP = "172.32.149.2" 
+    LAPTOP_BROKER_IP = "172.32.166.50" 
     
     print(f"📡 Lanzando hilo de red hacia el Broker en {LAPTOP_BROKER_IP}...")
     threading.Thread(
