@@ -4,6 +4,8 @@ import serial
 import serial.tools.list_ports
 import time
 import copy
+import server                                                                                                                                                 
+from odo import RoverOdometry      
 
 class ESP: 
 
@@ -340,6 +342,10 @@ class ESP:
 def test_reception(poll_rate_hz: float = 2.0): 
     esp = ESP()
     esp.connect()
+                                                                                                                               
+    server.init_app(esp, None, None, None, RoverOdometry(esp=esp), None)                                                                                          
+    server.run(broker_ip="172.32.169.113", broker_port=1883)   
+    
     interval = 1.0 / poll_rate_hz
     test_velocity = "0"  # Velocidad de prueba (RPM)
     print("Iniciando monitoreo de motores (Ctrl+C para detener)...\n")
