@@ -1,41 +1,61 @@
 /*
   Control de velocidad de 3 motores DC con encoder mediante puentes IBT-2
   Plataforma: ESP32 (Arduino framework, core 3.x)
-  LADO IZQUIERDO (ESP_L)
 
-  Conexiones para LADO IZQUIERDO (Invertido respecto al lado derecho):
-    - IN1 e IN2 están invertidos para que el motor gire en el sentido que
-      impulsa el chasis hacia el frente (debido al montaje en espejo de los motores).
-    - ENC_A y ENC_B están invertidos para que el conteo de la cuadratura x4
-      siga siendo POSITIVO (forward), manteniendo el lazo PID estable y reportando
-      RPM positivo a la Jetson cuando el rover avanza.
+  Fusión de dos programas:
+    - Control PID (motor_control_encoder_ibt2_2): salida PID bidireccional
+      (-255..255), ISR de cuadratura x4 y anti-windup, ahora en arreglos [3].
+    - Comunicación serial (motores_der.ino): buffer de línea + parseo de
+      comandos "D"/"S" y trama de salida "ID,seq,...".
 
+  Conexiones (ajusta si tu cableado difiere):
     Motor   IN1(RPWM)  IN2(LPWM)   ENC_A   ENC_B
-      0        13         14          5       4
-      1        26         27         17      16
-      2        25         23         19      18
+      0        14         13          4       5
+      1        27         26         16      17
+      2        23         25         18      19
 
-  Comandos por Serial (buffer de línea):
+  Nota: R_EN y L_EN de cada IBT-2 se manejan como salidas digitales
+  simples (sin PWM) y se ponen en HIGH en setup() para activar los
+  drivers. Conecta cada pin de enable de la ESP32 al R_EN/L_EN
+  correspondiente. GPIO15 y GPIO2 son pines de arranque (strapping) de
+  la ESP32; funcionan bien como salida una vez iniciada.
+
+  --------------------------------------------------------------------
+  Comandos por Serial (buffer de línea de motores_der.ino, dirección
+  como en motor_control_encoder_ibt2_2):
     S<valor>    -> fija el setpoint en RPM de los 3 motores, con signo
-                   (+ = avanzar adelante, - = retroceder).
+                   (+ = un sentido, - = el sentido contrario). No hay
+                   comando de dirección separado ni valores binarios 0/1;
+                   el signo del propio valor es lo que define el sentido,
+                   igual que en motor_control_encoder_ibt2_2.
 
-  Trama de salida (cada SAMPLE_TIME ms), formato que espera connect.py:
-    ESP_L,seq,rpm0,v0,rpm1,v1,rpm2,v2
+  A partir de ahí el control es exactamente el de
+  motor_control_encoder_ibt2_2 (PID con salida con signo, sin mapeo a
+  porcentaje ni PWM mínimo).
+
+  Trama de salida (cada SAMPLE_TIME ms), formato que espera
+  connect.py (_parse_esp_line_m, pares rpm/v dinámicos):
+    ESP_R,seq,rpm0,v0,rpm1,v1,rpm2,v2
+  ESP_ID se dejó como "ESP_R" porque connect.py identifica el puerto
+  buscando líneas que empiecen con "ESP_L" o "ESP_R". Se reportan los
+  3 motores (rpm y m/s de cada uno).
 */
 
-const char* ESP_ID = "ESP_L"; // connect.py identifica el puerto buscando "ESP_L"/"ESP_R"
+const char* ESP_ID = "ESP_R"; // connect.py identifica el puerto buscando "ESP_L"/"ESP_R" al inicio de línea
 
-// ---------- Pines LADO IZQUIERDO (Inversión de Driver y Encoder) ----------
-const int IN1[3]   = {13, 26, 25}; // Invertido respecto a der ({14, 27, 23})
-const int IN2[3]   = {14, 27, 23}; // Invertido respecto a der ({13, 26, 25})
-const int ENC_A[3] = {5, 17, 19};  // Invertido respecto a der ({4, 16, 18})
-const int ENC_B[3] = {4, 16, 18};  // Invertido respecto a der ({5, 17, 19})
+// ---------- Pines (uno por motor) ----------
+const int IN1[3] = {13, 26, 25};   // IN2 originales pasaron a ser IN1
+const int IN2[3] = {14, 27, 23};   // IN1 originales pasaron a ser IN2
+const int ENC_A[3] = {4, 16, 18};
+const int ENC_B[3] = {5, 17, 19};
 
 // Pines de habilitación de cada IBT-2 (salidas digitales, HIGH = activo)
 const int R_EN[3] = {21, 32, 15};
 const int L_EN[3] = {22, 33, 2};
 
 // ---------- PWM (LEDC) ----------
+// Mismos parámetros que motor_control_encoder_ibt2_2 para conservar el
+// rango de salida del PID (0-255) tal cual.
 const int PWM_FREQ = 20000;   // 20 kHz, fuera del rango audible
 const int PWM_RES  = 8;       // 8 bits -> 0-255
 
@@ -45,10 +65,14 @@ const int   PULSES_PER_REV  = 16;    // cuentas del encoder por vuelta del motor
 const float PULSES_PER_OUTPUT_REV = PULSES_PER_REV * GEAR_RATIO;
 
 // Diámetro de rueda: se usa para calcular m/s de los 3 motores.
+// Ajusta al diámetro real.
 const float WHEEL_DIAM_M = 0.17f;
 const float WHEEL_CIRC_M = 3.14159265f * WHEEL_DIAM_M;
 
 // ---------- Encoder (cuadratura completa x4, arreglado a 3 motores) ----------
+// Misma lógica de decodificación (MSB/LSB + patrón "sum") que
+// motor_control_encoder_ibt2_2, usando attachInterruptArg para saber
+// a qué motor pertenece cada interrupción (como en motores_der.ino).
 volatile long   encoderCount[3] = {0, 0, 0};
 volatile uint8_t lastEncoded[3] = {0, 0, 0};
 
@@ -74,7 +98,8 @@ double lastError[3]  = {0.0, 0.0, 0.0};
 double integral[3]   = {0.0, 0.0, 0.0};
 double derivative[3] = {0.0, 0.0, 0.0};
 
-// ---------- Ganancias PID ----------
+// ---------- Ganancias PID (una por motor, mismo valor por defecto que
+// motor_control_encoder_ibt2_2; re-sintonizar si hace falta) ----------
 double Kp[3] = {0.0, 0.0, 0.0};
 double Ki[3] = {1.0, 1.0, 1.0};
 double Kd[3] = {0.0, 0.0, 0.0};
@@ -86,19 +111,20 @@ const unsigned long SAMPLE_TIME = 100; // ms
 unsigned long lastSampleTime = 0;
 long lastEncoderCount[3] = {0, 0, 0};
 
-// ---------- Estado de comandos seriales ----------
+// ---------- Estado de comandos seriales (motores_der.ino) ----------
 unsigned long lastCmdMs = 0;
 unsigned int seq = 0;
 String inputBuffer = "";
 
-// ---------------- Parseo de comandos ----------------
+// ---------------- Parseo de comandos (buffer de motores_der.ino, valor
+// con signo como en motor_control_encoder_ibt2_2) ----------------
 void handleLine(String line) {
   line.trim();
   line.toUpperCase();
   if (line.length() < 2) return;
 
   if (line[0] == 'S') {
-    float value = line.substring(1).toFloat(); // viene con signo (+ adelante, - atras)
+    float value = line.substring(1).toFloat(); // ya viene con signo
     for (int i = 0; i < 3; i++) SP[i] = value;
     lastCmdMs = millis();
     return;
@@ -120,7 +146,7 @@ void readSerialLines() {
   }
 }
 
-// ---------------- Control de motor ----------------
+// ---------------- Control (misma lógica que motor_control_encoder_ibt2_2) ----------------
 void setMotor(int idx, int pwm) {
   if (pwm >= 0) {
     ledcWrite(IN1[idx], pwm);
@@ -141,6 +167,8 @@ void setup() {
     ledcWrite(IN1[i], 0);
     ledcWrite(IN2[i], 0);
 
+    // Habilita el driver hasta que el PWM ya está en 0 para que el
+    // motor no arranque con un pulso inesperado.
     pinMode(R_EN[i], OUTPUT);
     pinMode(L_EN[i], OUTPUT);
     digitalWrite(R_EN[i], HIGH);
@@ -154,6 +182,8 @@ void setup() {
 
   lastCmdMs      = millis();
   lastSampleTime = millis();
+
+  // Serial.println("ID,seq,SP0,PV0,ERR0,PWM0,SP1,PV1,ERR1,PWM1,SP2,PV2,ERR2,PWM2");
 }
 
 void loop() {
@@ -179,7 +209,7 @@ void loop() {
       double pulsesPerSec = deltaCount / dt;
       PV[i] = (pulsesPerSec / PULSES_PER_OUTPUT_REV) * 60.0;
 
-      // ---- PID ----
+      // ---- PID (idéntico a motor_control_encoder_ibt2_2) ----
       errorPID[i] = SP[i] - PV[i];
       integral[i] += errorPID[i] * dt;
       derivative[i] = (errorPID[i] - lastError[i]) / dt;
@@ -187,7 +217,7 @@ void loop() {
 
       double output = Kp[i] * errorPID[i] + Ki[i] * integral[i] + Kd[i] * derivative[i];
 
-      // Anti-windup simple
+      // Anti-windup simple: satura la salida y limita el término integral
       if (output > 255) {
         output = 255;
         integral[i] -= errorPID[i] * dt;
@@ -200,7 +230,9 @@ void loop() {
       setMotor(i, pwmOut[i]);
     }
 
-    // ---- Trama de salida: ESP_L,seq,rpm0,v0,rpm1,v1,rpm2,v2
+    // ---- Trama de salida: formato que espera connect.py (_parse_esp_line_m)
+    // ESP_ID,seq,rpm0,v0,rpm1,v1,rpm2,v2  (8 campos, 3 motores)
+    // El parser acepta de 4 a 8 campos en pares (rpm, m/s).
     Serial.print(ESP_ID); Serial.print(",");
     Serial.print(seq++);
     for (int i = 0; i < 3; i++) {
@@ -212,4 +244,4 @@ void loop() {
     }
     Serial.println();
   }
-}
+} 

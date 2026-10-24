@@ -5,7 +5,7 @@ from connect import ESP
 
 
 class RoverOdometry:
-    """
+    """ 
     Calcula la odometría del rover en tiempo real mediante modelo diferencial.
     Obtiene rover_state directamente desde la instancia ESP (local).
 
