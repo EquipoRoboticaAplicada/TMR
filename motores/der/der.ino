@@ -9,7 +9,7 @@
       comandos "D"/"S" y trama de salida "ID,seq,...".
 
   Conexiones (ajusta si tu cableado difiere):
-    Motor   IN1(RPWM)  IN2(LPWM)   ENC_A   ENC_B
+    Motor   IN2(LPWM)  IN1(RPWM)   ENC_B   ENC_A
       0        14         13          4       5
       1        27         26         16      17
       2        23         25         18      19
@@ -44,14 +44,14 @@
 const char* ESP_ID = "ESP_R"; // connect.py identifica el puerto buscando "ESP_L"/"ESP_R" al inicio de línea
 
 // ---------- Pines (uno por motor) ----------
-const int IN1[3] = {13, 26, 25};   // IN2 originales pasaron a ser IN1
-const int IN2[3] = {14, 27, 23};   // IN1 originales pasaron a ser IN2
-const int ENC_A[3] = {4, 16, 18};
-const int ENC_B[3] = {5, 17, 19};
+const int IN1[3] = {14, 27, 23};   // IN2 originales pasaron a ser IN1
+const int IN2[3] = {13, 26, 25};   // IN1 originales pasaron a ser IN2
+const int ENC_A[3] = {5, 17, 19};
+const int ENC_B[3] = {4, 16, 18};
 
 // Pines de habilitación de cada IBT-2 (salidas digitales, HIGH = activo)
-const int R_EN[3] = {21, 32, 15};
-const int L_EN[3] = {22, 33, 2};
+const int R_EN[3] = {22, 33, 2};
+const int L_EN[3] = {21, 32, 15};
 
 // ---------- PWM (LEDC) ----------
 // Mismos parámetros que motor_control_encoder_ibt2_2 para conservar el
@@ -103,7 +103,7 @@ double derivative[3] = {0.0, 0.0, 0.0};
 double Kp[3] = {0.0, 0.0, 0.0};
 double Ki[3] = {1.0, 1.0, 1.0};
 double Kd[3] = {0.0, 0.0, 0.0};
-
+  
 int pwmOut[3] = {0, 0, 0};
 
 // ---------- Tiempo de muestreo ----------
