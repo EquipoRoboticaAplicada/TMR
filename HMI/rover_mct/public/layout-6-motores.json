@@ -1,0 +1,20 @@
+{
+    "name": "Rover — 6 Motores RPM",
+    "identifier": {
+        "namespace": "rover.spacecraft",
+        "key": "layout-6-motores"
+    },
+    "type": "telemetry.panel",
+    "composition": [
+        { "namespace": "rover.spacecraft", "key": "rpm_m_izq1" },
+        { "namespace": "rover.spacecraft", "key": "rpm_m_izq2" },
+        { "namespace": "rover.spacecraft", "key": "rpm_m_izq3" },
+        { "namespace": "rover.spacecraft", "key": "rpm_m_der1" },
+        { "namespace": "rover.spacecraft", "key": "rpm_m_der2" },
+        { "namespace": "rover.spacecraft", "key": "rpm_m_der3" }
+    ],
+    "configuration": {
+        "layout": "stacked-plot",
+        "note": "Importar en OpenMCT: My Items -> Import. Muestra los 6 RPM (con signo: + adelante / - reversa) en un solo Stacked Plot. Alternativa manual: crear Display Layout -> Stacked Plot y arrastrar los 6 RPM."
+    }
+}

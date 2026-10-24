@@ -1,0 +1,23 @@
+{
+  "name": "rover_mct",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "broker": "node broker.js",
+    "hmi": "node server.js",
+    "hmi:remote": "node server.js mqtt://172.32.149.2:1883",
+    "dev": "node broker.js & node server.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "aedes": "^1.1.1",
+    "express": "^5.2.1",
+    "mqtt": "^5.15.1",
+    "openmct": "^4.3.0-rc1",
+    "ws": "^8.21.0"
+  }
+}

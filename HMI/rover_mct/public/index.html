@@ -1,0 +1,302 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>NASA Open MCT - Rover Lunar</title>
+    <script src="/node_modules/openmct/dist/openmct.js"></script>
+</head>
+<body style="margin: 0; height: 100vh;">
+    <div id="element-container" style="width: 100%; height: 100%;"></div>
+    <!-- Burbuja flotante HMI: abajo-derecha para no tapar el menú superior de OpenMCT (Create, etc.) -->
+    <div id="hmi-bar" style="position:fixed; right:12px; bottom:12px; display:flex; align-items:center; gap:10px; padding:8px 12px; background:rgba(15,23,42,0.92); color:#e2e8f0; font-family:sans-serif; font-size:12px; z-index:9999; border-radius:10px; border:1px solid #334155; box-shadow:0 4px 16px rgba(0,0,0,.4); max-width:min(92vw,560px); flex-wrap:wrap;">
+        <span style="font-weight:bold;">🌙 Rover</span>
+        <span id="hmi-status" style="color:#94a3b8;">broker: …</span>
+        <button id="btn-reset" style="background:#2563eb; color:white; border:0; border-radius:6px; padding:6px 12px; cursor:pointer;">⟲ Reset Pose</button>
+        <span id="reset-msg" style="color:#94a3b8;"></span>
+    </div>
+    <script>
+        // Botón Reset Pose -> POST /api/reset-pose -> publish rover/commands {action:reset_pose}
+        document.getElementById('btn-reset').addEventListener('click', async () => {
+            const msg = document.getElementById('reset-msg');
+            msg.textContent = 'enviando…';
+            try {
+                const r = await fetch('/api/reset-pose', { method: 'POST' });
+                const j = await r.json();
+                msg.textContent = r.ok ? '✅ reset enviado' : ('❌ ' + (j.error || r.status));
+            } catch (e) { msg.textContent = '❌ ' + e.message; }
+            setTimeout(() => msg.textContent = '', 3000);
+        });
+        fetch('/api/status').then(r => r.json()).then(s => {
+            document.getElementById('hmi-status').textContent =
+                `broker: ${s.broker_url} | mqtt:${s.mqtt_connected ? 'OK' : '…'} | ws:${s.ws_clients}`;
+        }).catch(() => {});
+        setInterval(() => {
+            fetch('/api/status').then(r => r.json()).then(s => {
+                document.getElementById('hmi-status').textContent =
+                    `broker: ${s.broker_url} | mqtt:${s.mqtt_connected ? 'OK' : '…'} | ws:${s.ws_clients} | topics:${(s.topics_seen || []).join(',')}`;
+            }).catch(() => {});
+        }, 5000);
+        openmct.setAssetPath('/node_modules/openmct/dist');
+        openmct.install(openmct.plugins.DarkmatterTheme());
+        openmct.install(openmct.plugins.LocalStorage());
+        openmct.install(openmct.plugins.MyItems());
+        openmct.install(openmct.plugins.UTCTimeSystem());
+        openmct.time.setClock('local');
+        openmct.time.setClockOffsets({start: -15 * 60 * 1000, end: 0});
+        openmct.time.setTimeSystem('utc');
+
+        // 1. Vista 2D Canvas registrada sobre el panel estándar (fuera del fetch).
+        // El objeto rover_trajectory es type telemetry.panel (ver dictionary.json),
+        // así OpenMCT siempre abre la pestaña; nuestra vista "Plano 2D" aparece
+        // con prioridad alta junto a las vistas nativas del panel.
+        // El canvas se suscribe a pos_x/pos_y/pos_theta (no al propio panel).
+        openmct.objectViews.addProvider({
+            key: 'rover-2d-trajectory-view',
+            name: 'Plano 2D',
+            priority: 100,
+            canView(domainObject) {
+                return domainObject.identifier &&
+                    domainObject.identifier.namespace === 'rover.spacecraft' &&
+                    domainObject.identifier.key === 'rover_trajectory';
+            },
+            view(domainObject) {
+                let unsubscribeX, unsubscribeY, unsubscribeTheta;
+                let posX = 0, posY = 0, theta = 0;
+                const trail = [];
+                const maxPoints = 500;
+
+                return {
+                    show(container) {
+                        container.innerHTML = `
+                            <div style="width:100%; height:100%; display:flex; flex-direction:column; align-items:center; justify-content:center; background:#1e1e1e;">
+                                <canvas id="roverCanvas" width="600" height="600" style="background:#111; border:1px solid #333;"></canvas>
+                                <div id="coordsInfo" style="color:#aaa; font-family:monospace; margin-top:8px;">
+                                    X: 0.00 m | Y: 0.00 m | θ: 0.00 rad
+                                </div>
+                            </div>
+                        `;
+
+                        const canvas = container.querySelector('#roverCanvas');
+                        const ctx = canvas.getContext('2d');
+                        const coordsDiv = container.querySelector('#coordsInfo');
+
+                        const scale = 30; // 30 px = 1 metro
+                        const originX = canvas.width / 2;
+                        const originY = canvas.height / 2;
+
+                        function render() {
+                            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+                            // Ejes cartesianos
+                            ctx.strokeStyle = '#2d3748';
+                            ctx.lineWidth = 1;
+                            ctx.beginPath();
+                            ctx.moveTo(0, originY); ctx.lineTo(canvas.width, originY);
+                            ctx.moveTo(originX, 0); ctx.lineTo(originX, canvas.height);
+                            ctx.stroke();
+
+                            // Dibujar trayectoria recorrida
+                            if (trail.length > 1) {
+                                ctx.strokeStyle = '#38bdf8';
+                                ctx.lineWidth = 2;
+                                ctx.beginPath();
+                                trail.forEach((pt, i) => {
+                                    const cx = originX + pt.x * scale;
+                                    const cy = originY - pt.y * scale;
+                                    if (i === 0) ctx.moveTo(cx, cy);
+                                    else ctx.lineTo(cx, cy);
+                                });
+                                ctx.stroke();
+                            }
+
+                            // Marcador del rover y orientación
+                            const currentCx = originX + posX * scale;
+                            const currentCy = originY - posY * scale;
+
+                            ctx.save();
+                            ctx.translate(currentCx, currentCy);
+                            ctx.rotate(-theta);
+
+                            ctx.fillStyle = '#ef4444';
+                            ctx.beginPath();
+                            ctx.arc(0, 0, 8, 0, 2 * Math.PI);
+                            ctx.fill();
+
+                            ctx.strokeStyle = '#facc15';
+                            ctx.lineWidth = 3;
+                            ctx.beginPath();
+                            ctx.moveTo(0, 0);
+                            ctx.lineTo(16, 0);
+                            ctx.stroke();
+                            ctx.restore();
+
+                            coordsDiv.innerText = `X: ${posX.toFixed(2)} m | Y: ${posY.toFixed(2)} m | θ: ${theta.toFixed(2)} rad`;
+                        }
+
+                        // CORREGIDO: Usar el namespace rover.spacecraft coincidente con tu proveedor
+                        openmct.objects.get({ namespace: 'rover.spacecraft', key: 'pos_x' }).then(obj => {
+                            unsubscribeX = openmct.telemetry.subscribe(obj, datum => {
+                                posX = datum.value;
+                                trail.push({ x: posX, y: posY });
+                                if (trail.length > maxPoints) trail.shift();
+                                render();
+                            });
+                        });
+
+                        openmct.objects.get({ namespace: 'rover.spacecraft', key: 'pos_y' }).then(obj => {
+                            unsubscribeY = openmct.telemetry.subscribe(obj, datum => {
+                                posY = datum.value;
+                                render();
+                            });
+                        });
+
+                        openmct.objects.get({ namespace: 'rover.spacecraft', key: 'pos_theta' }).then(obj => {
+                            unsubscribeTheta = openmct.telemetry.subscribe(obj, datum => {
+                                theta = datum.value;
+                                render();
+                            });
+                        });
+
+                        render();
+                    },
+                    destroy() {
+                        if (unsubscribeX) unsubscribeX();
+                        if (unsubscribeY) unsubscribeY();
+                        if (unsubscribeTheta) unsubscribeTheta();
+                    }
+                };
+            }
+        });
+
+        // WebSocket y Telemetría
+        const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        const ws = new WebSocket(`${wsProtocol}//${window.location.host}`);
+        const listeners = {};
+
+        ws.onmessage = function (event) {
+            const packet = JSON.parse(event.data);
+            if (listeners[packet.id]) {
+                listeners[packet.id]({
+                    id: packet.id,
+                    utc: packet.utc,
+                    value: packet.value
+                });
+            }
+        };
+
+        openmct.telemetry.addProvider({
+            // 1. Soporte de Metadatos (Corrige el TypeError en TelemetryTableViewProvider)
+            supportsMetadata: function (domainObject) {
+                return Boolean(domainObject.telemetry);
+            },
+            getMetadata: function (domainObject) {
+                return domainObject.telemetry;
+            },
+
+            // 2. Suscripción en tiempo real (Acepta cualquier objeto con campo telemetry)
+            supportsSubscribe: function (domainObject) {
+                return Boolean(domainObject.telemetry);
+            },
+            subscribe: function (domainObject, callback) {
+                listeners[domainObject.identifier.key] = callback;
+                return function unsubscribe() {
+                    delete listeners[domainObject.identifier.key];
+                };
+            },
+
+            // 3. Solicitud de datos históricos (Elimina el error Missing request provider)
+            supportsRequest: function (domainObject) {
+                return Boolean(domainObject.telemetry);
+            },
+            request: function (domainObject, options) {
+                // Si no tienes base de datos histórica, resuelve una lista vacía para no bloquear la gráfica
+                return Promise.resolve([]);
+            }
+        });
+
+        // Cargar diccionario y generar la composición
+        fetch('/dictionary.json')
+            .then(res => res.json())
+            .then(dictionary => {
+                openmct.objects.addProvider('rover.spacecraft', {
+                    get: async function (identifier) {
+                        if (identifier.key === 'rover') {
+                            return {
+                                identifier: identifier,
+                                name: dictionary.name,
+                                type: 'folder',
+                                location: 'ROOT'
+                            };
+                        }
+                        
+                        const measurement = dictionary.measurements.find(m => m.key === identifier.key);
+                        if (!measurement){
+                            return {
+                                identifier: identifier,
+                                name: identifier.key, 
+                                type: 'unknown'
+                            };
+                        }
+
+                        // robusto: respeta type del dictionary (telemetry.panel para mapa)
+                        const objType = measurement.type || 'telemetry';
+                        
+                        return {
+                            identifier: identifier,
+                            name: measurement.name,
+                            type: objType,
+                            telemetry: {
+                                values: [
+                                    { 
+                                        key: 'value', 
+                                        name: 'Valor', 
+                                        units: measurement.units || '', 
+                                        format: 'float', 
+                                        hints: { range: 1 } 
+                                    },
+                                    { 
+                                        key: 'utc', 
+                                        name: 'Tiempo', 
+                                        format: 'utc', 
+                                        hints: { domain: 1 } 
+                                    }
+                                ]
+                            },
+                            location: 'rover.spacecraft:rover'
+                        };
+                    }
+                });
+
+                openmct.composition.addProvider({
+                    appliesTo: function (domainObject) {
+                        return domainObject.identifier.namespace === 'rover.spacecraft' &&
+                            (domainObject.identifier.key === 'rover' ||
+                             domainObject.identifier.key === 'rover_trajectory');
+                    },
+                    load: async function (domainObject) {
+                        // El panel del mapa contiene sus 3 fuentes: X, Y, theta.
+                        // Así las vistas nativas del panel (plot/tabla) también tienen datos.
+                        if (domainObject.identifier.key === 'rover_trajectory') {
+                            return [
+                                { namespace: 'rover.spacecraft', key: 'pos_x' },
+                                { namespace: 'rover.spacecraft', key: 'pos_y' },
+                                { namespace: 'rover.spacecraft', key: 'pos_theta' }
+                            ];
+                        }
+                        return dictionary.measurements.map(m => ({
+                            namespace: 'rover.spacecraft',
+                            key: m.key
+                        }));
+                    }
+                });
+
+                openmct.objects.addRoot({
+                    namespace: 'rover.spacecraft',
+                    key: 'rover'
+                });
+                
+                openmct.start(document.getElementById('element-container'));
+            })
+            .catch(err => console.error("Error cargando el diccionario de telemetría:", err));
+    </script>
+</body>
+</html>

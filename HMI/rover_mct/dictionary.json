@@ -1,0 +1,98 @@
+{
+    "name": "Misión Lunar Rover",
+    "identifier": {
+        "namespace": "rover.spacecraft",
+        "key": "rover"
+    },
+    "measurements": [
+        {
+            "name": "Navegación X",
+            "key": "pos_x",
+            "units": "metros",
+            "type": "float"
+        },
+        {
+            "name": "Navegación Y",
+            "key": "pos_y",
+            "units": "metros",
+            "type": "float"
+        },
+        {
+            "name": "Orientación (Theta)",
+            "key": "pos_theta",
+            "units": "radianes",
+            "type": "float"
+        },
+        {
+            "name": "Velocidad Lineal (V)",
+            "key": "vel_v",
+            "units": "m/s",
+            "type": "float"
+        },
+        {
+            "name": "Velocidad Angular (Omega)",
+            "key": "vel_omega",
+            "units": "rad/s",
+            "type": "float"
+        },
+        {
+            "name": "Inclinación (Pitch)",
+            "key": "pitch",
+            "units": "grados",
+            "type": "float"
+        },
+        {
+            "name": "Rumbo (Heading)",
+            "key": "heading",
+            "units": "grados",
+            "type": "float"
+        },
+        {
+            "name": "Masa del Suelo (Peso)",
+            "key": "peso",
+            "units": "kilogramos",
+            "type": "float"
+        },
+        {
+            "name": "Motor Izquierdo 1 - RPM",
+            "key": "rpm_m_izq1",
+            "units": "RPM",
+            "type": "float"
+        },
+        {
+            "name": "Motor Izquierdo 2 - RPM",
+            "key": "rpm_m_izq2",
+            "units": "RPM",
+            "type": "float"
+        },
+        {
+            "name": "Motor Izquierdo 3 - RPM",
+            "key": "rpm_m_izq3",
+            "units": "RPM",
+            "type": "float"
+        },
+        {
+            "name": "Motor Derecho 1 - RPM",
+            "key": "rpm_m_der1",
+            "units": "RPM",
+            "type": "float"
+        },
+        {
+            "name": "Motor Derecho 2 - RPM",
+            "key": "rpm_m_der2",
+            "units": "RPM",
+            "type": "float"
+        },
+        {
+            "name": "Motor Derecho 3 - RPM",
+            "key": "rpm_m_der3",
+            "units": "RPM",
+            "type": "float"
+        },
+        {
+            "name": "Mapa 2D de Navegación",
+            "key": "rover_trajectory",
+            "type": "telemetry.panel"
+        }
+    ]
+}
