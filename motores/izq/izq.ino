@@ -2,12 +2,6 @@
   Control de velocidad de 3 motores DC con encoder mediante puentes IBT-2
   Plataforma: ESP32 (Arduino framework, core 3.x)
 
-  Fusión de dos programas:
-    - Control PID (motor_control_encoder_ibt2_2): salida PID bidireccional
-      (-255..255), ISR de cuadratura x4 y anti-windup, ahora en arreglos [3].
-    - Comunicación serial (motores_der.ino): buffer de línea + parseo de
-      comandos "D"/"S" y trama de salida "ID,seq,...".
-
   Conexiones (ajusta si tu cableado difiere):
     Motor   IN1(RPWM)  IN2(LPWM)   ENC_A   ENC_B
       0        14         13          4       5
@@ -17,21 +11,7 @@
   Nota: R_EN y L_EN de cada IBT-2 se manejan como salidas digitales
   simples (sin PWM) y se ponen en HIGH en setup() para activar los
   drivers. Conecta cada pin de enable de la ESP32 al R_EN/L_EN
-  correspondiente. GPIO15 y GPIO2 son pines de arranque (strapping) de
-  la ESP32; funcionan bien como salida una vez iniciada.
-
-  --------------------------------------------------------------------
-  Comandos por Serial (buffer de línea de motores_der.ino, dirección
-  como en motor_control_encoder_ibt2_2):
-    S<valor>    -> fija el setpoint en RPM de los 3 motores, con signo
-                   (+ = un sentido, - = el sentido contrario). No hay
-                   comando de dirección separado ni valores binarios 0/1;
-                   el signo del propio valor es lo que define el sentido,
-                   igual que en motor_control_encoder_ibt2_2.
-
-  A partir de ahí el control es exactamente el de
-  motor_control_encoder_ibt2_2 (PID con salida con signo, sin mapeo a
-  porcentaje ni PWM mínimo).
+  correspondiente. 
 
   Trama de salida (cada SAMPLE_TIME ms), formato que espera
   connect.py (_parse_esp_line_m, pares rpm/v dinámicos):
@@ -100,7 +80,7 @@ double derivative[3] = {0.0, 0.0, 0.0};
 
 // ---------- Ganancias PID (una por motor, mismo valor por defecto que
 // motor_control_encoder_ibt2_2; re-sintonizar si hace falta) ----------
-double Kp[3] = {0.0, 0.0, 0.0};
+double Kp[3] = {0.5, 0.5, 0.5};
 double Ki[3] = {1.0, 1.0, 1.0};
 double Kd[3] = {0.0, 0.0, 0.0};
 
