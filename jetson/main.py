@@ -9,7 +9,7 @@ from local_debug import run_debug
 import threading
 import time
 
-DRAW_LOCAL = False  # ← cambiar a False para desactivar la ventana de debug
+DRAW_LOCAL = True  # ← cambiar a False para desactivar la ventana de debug
 
 
 # Modificación en jetson/main.py
