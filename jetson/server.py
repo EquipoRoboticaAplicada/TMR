@@ -105,8 +105,11 @@ def run(broker_ip="172.32.149.2", broker_port=1883):
     # Set Last Will: If Jetson drops out violently, Broker sets topic to offline
     client.will_set(TOPIC_STATUS, "offline", qos=1, retain=True)
 
-    print(f"Connecting to MQTT Broker at {broker_ip}:{broker_port}...")
-    client.connect(broker_ip, broker_port, keepalive=60)
+    try:    
+        print(f"Connecting to MQTT Broker at {broker_ip}:{broker_port}...")
+        client.connect(broker_ip, broker_port, keepalive=60)
+    except Exception as e:
+        print(f"Error connecting to MQTT Broker: {e}")
 
     # Start network loop in its own background thread
     client.loop_start()
