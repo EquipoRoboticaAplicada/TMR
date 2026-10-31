@@ -6,6 +6,11 @@
     },
     "measurements": [
         {
+            "name": "Mapa 2D de Navegación",
+            "key": "rover_trajectory",
+            "type": "rover.trajectory"
+        },
+        {
             "name": "Navegación X",
             "key": "pos_x",
             "units": "metros",
@@ -88,11 +93,6 @@
             "key": "rpm_m_der3",
             "units": "RPM",
             "type": "float"
-        },
-        {
-            "name": "Mapa 2D de Navegación",
-            "key": "rover_trajectory",
-            "type": "telemetry.panel"
         }
     ]
 }

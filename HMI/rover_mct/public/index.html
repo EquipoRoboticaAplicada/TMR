@@ -44,33 +44,42 @@
         openmct.time.setClockOffsets({start: -15 * 60 * 1000, end: 0});
         openmct.time.setTimeSystem('utc');
 
-        // 1. Vista 2D Canvas registrada sobre el panel estándar (fuera del fetch).
-        // El objeto rover_trajectory es type telemetry.panel (ver dictionary.json),
-        // así OpenMCT siempre abre la pestaña; nuestra vista "Plano 2D" aparece
-        // con prioridad alta junto a las vistas nativas del panel.
-        // El canvas se suscribe a pos_x/pos_y/pos_theta (no al propio panel).
+        // Tipo personalizado para el Mapa 2D (sin formato carpeta ni dropdown)
+        openmct.types.addType('rover.trajectory', {
+            name: 'Mapa 2D',
+            description: 'Plano cartesiano 2D del Rover',
+            cssClass: 'icon-plan'
+        });
+
+        // 1. Vista 2D Canvas registrada sobre el objeto de trayectoria.
+        // Se define con prioridad alta (1000) para que Open MCT la abra por defecto.
         openmct.objectViews.addProvider({
             key: 'rover-2d-trajectory-view',
             name: 'Plano 2D',
-            priority: 100,
+            priority: 1000,
             canView(domainObject) {
-                return domainObject.identifier &&
-                    domainObject.identifier.namespace === 'rover.spacecraft' &&
-                    domainObject.identifier.key === 'rover_trajectory';
+                return domainObject.type === 'rover.trajectory' ||
+                    (domainObject.identifier &&
+                     domainObject.identifier.namespace === 'rover.spacecraft' &&
+                     domainObject.identifier.key === 'rover_trajectory');
             },
             view(domainObject) {
                 let unsubscribeX, unsubscribeY, unsubscribeTheta;
                 let posX = 0, posY = 0, theta = 0;
-                const trail = [];
-                const maxPoints = 500;
+                let trail = [];
+                const maxPoints = 1000;
 
                 return {
                     show(container) {
                         container.innerHTML = `
-                            <div style="width:100%; height:100%; display:flex; flex-direction:column; align-items:center; justify-content:center; background:#1e1e1e;">
-                                <canvas id="roverCanvas" width="600" height="600" style="background:#111; border:1px solid #333;"></canvas>
-                                <div id="coordsInfo" style="color:#aaa; font-family:monospace; margin-top:8px;">
-                                    X: 0.00 m | Y: 0.00 m | θ: 0.00 rad
+                            <div style="width:100%; height:100%; display:flex; flex-direction:column; align-items:center; justify-content:center; background:#0f172a; position:relative; overflow:hidden;">
+                                <div style="position:absolute; top:12px; left:16px; display:flex; gap:8px; z-index:10;">
+                                    <button id="btnResetTrail" style="background:#334155; color:#f8fafc; border:1px solid #475569; padding:4px 10px; border-radius:6px; font-size:11px; cursor:pointer;">Limpiar Estela</button>
+                                    <button id="btnCenterRover" style="background:#334155; color:#f8fafc; border:1px solid #475569; padding:4px 10px; border-radius:6px; font-size:11px; cursor:pointer;">Centrar</button>
+                                </div>
+                                <canvas id="roverCanvas" width="700" height="600" style="background:#020617; border:1px solid #1e293b; border-radius:8px; box-shadow:0 4px 20px rgba(0,0,0,0.5); max-width:96%; max-height:82%; width:auto; height:auto;"></canvas>
+                                <div id="coordsInfo" style="color:#94a3b8; font-family:monospace; font-size:13px; margin-top:10px; background:rgba(30,41,59,0.7); padding:6px 14px; border-radius:6px; border:1px solid #334155;">
+                                    X: 0.00 m | Y: 0.00 m | θ: 0.00 rad (0.0°)
                                 </div>
                             </div>
                         `;
@@ -78,26 +87,66 @@
                         const canvas = container.querySelector('#roverCanvas');
                         const ctx = canvas.getContext('2d');
                         const coordsDiv = container.querySelector('#coordsInfo');
+                        const btnReset = container.querySelector('#btnResetTrail');
+                        const btnCenter = container.querySelector('#btnCenterRover');
 
-                        const scale = 30; // 30 px = 1 metro
-                        const originX = canvas.width / 2;
-                        const originY = canvas.height / 2;
+                        if (btnReset) {
+                            btnReset.addEventListener('click', () => {
+                                trail = [];
+                                render();
+                            });
+                        }
+
+                        let scale = 35; // 35 px = 1 metro
+                        let originX = canvas.width / 2;
+                        let originY = canvas.height / 2;
+
+                        if (btnCenter) {
+                            btnCenter.addEventListener('click', () => {
+                                originX = canvas.width / 2 - posX * scale;
+                                originY = canvas.height / 2 + posY * scale;
+                                render();
+                            });
+                        }
 
                         function render() {
                             ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-                            // Ejes cartesianos
-                            ctx.strokeStyle = '#2d3748';
+                            // Cuadrícula métrica (cada 1 metro)
+                            ctx.strokeStyle = '#1e293b';
                             ctx.lineWidth = 1;
+                            const gridSize = scale;
+                            
+                            const startX = originX % gridSize;
+                            for (let x = startX; x < canvas.width; x += gridSize) {
+                                ctx.beginPath();
+                                ctx.moveTo(x, 0); ctx.lineTo(x, canvas.height);
+                                ctx.stroke();
+                            }
+                            const startY = originY % gridSize;
+                            for (let y = startY; y < canvas.height; y += gridSize) {
+                                ctx.beginPath();
+                                ctx.moveTo(0, y); ctx.lineTo(canvas.width, y);
+                                ctx.stroke();
+                            }
+
+                            // Ejes cartesianos principales
+                            ctx.strokeStyle = '#475569';
+                            ctx.lineWidth = 1.5;
                             ctx.beginPath();
                             ctx.moveTo(0, originY); ctx.lineTo(canvas.width, originY);
                             ctx.moveTo(originX, 0); ctx.lineTo(originX, canvas.height);
                             ctx.stroke();
 
-                            // Dibujar trayectoria recorrida
+                            // Etiquetas de origen
+                            ctx.fillStyle = '#64748b';
+                            ctx.font = '10px monospace';
+                            ctx.fillText('(0,0)', originX + 4, originY - 4);
+
+                            // Trayectoria recorrida (Trail)
                             if (trail.length > 1) {
                                 ctx.strokeStyle = '#38bdf8';
-                                ctx.lineWidth = 2;
+                                ctx.lineWidth = 2.5;
                                 ctx.beginPath();
                                 trail.forEach((pt, i) => {
                                     const cx = originX + pt.x * scale;
@@ -108,34 +157,43 @@
                                 ctx.stroke();
                             }
 
-                            // Marcador del rover y orientación
+                            // Marcador del Rover y Vector de Orientación
                             const currentCx = originX + posX * scale;
                             const currentCy = originY - posY * scale;
 
                             ctx.save();
                             ctx.translate(currentCx, currentCy);
-                            ctx.rotate(-theta);
+                            ctx.rotate(-theta); // Orientación theta
 
-                            ctx.fillStyle = '#ef4444';
+                            // Chasis del Rover (rectángulo estilizado)
+                            ctx.fillStyle = '#0284c7';
+                            ctx.strokeStyle = '#38bdf8';
+                            ctx.lineWidth = 2;
+                            ctx.fillRect(-12, -8, 24, 16);
+                            ctx.strokeRect(-12, -8, 24, 16);
+
+                            // Flecha indicadora de frente (Heading)
+                            ctx.fillStyle = '#facc15';
                             ctx.beginPath();
-                            ctx.arc(0, 0, 8, 0, 2 * Math.PI);
-                            ctx.fill();
-
+                            ctx.moveTo(12, 0);
+                            ctx.lineTo(20, 0);
+                            ctx.lineTo(16, -4);
+                            ctx.moveTo(20, 0);
+                            ctx.lineTo(16, 4);
                             ctx.strokeStyle = '#facc15';
                             ctx.lineWidth = 3;
-                            ctx.beginPath();
-                            ctx.moveTo(0, 0);
-                            ctx.lineTo(16, 0);
                             ctx.stroke();
+
                             ctx.restore();
 
-                            coordsDiv.innerText = `X: ${posX.toFixed(2)} m | Y: ${posY.toFixed(2)} m | θ: ${theta.toFixed(2)} rad`;
+                            const deg = (theta * (180 / Math.PI)).toFixed(1);
+                            coordsDiv.innerText = `X: ${posX.toFixed(2)} m | Y: ${posY.toFixed(2)} m | θ: ${theta.toFixed(2)} rad (${deg}°)`;
                         }
 
-                        // CORREGIDO: Usar el namespace rover.spacecraft coincidente con tu proveedor
+                        // Suscripciones a telemetría
                         openmct.objects.get({ namespace: 'rover.spacecraft', key: 'pos_x' }).then(obj => {
                             unsubscribeX = openmct.telemetry.subscribe(obj, datum => {
-                                posX = datum.value;
+                                posX = Number(datum.value) || 0;
                                 trail.push({ x: posX, y: posY });
                                 if (trail.length > maxPoints) trail.shift();
                                 render();
@@ -144,14 +202,14 @@
 
                         openmct.objects.get({ namespace: 'rover.spacecraft', key: 'pos_y' }).then(obj => {
                             unsubscribeY = openmct.telemetry.subscribe(obj, datum => {
-                                posY = datum.value;
+                                posY = Number(datum.value) || 0;
                                 render();
                             });
                         });
 
                         openmct.objects.get({ namespace: 'rover.spacecraft', key: 'pos_theta' }).then(obj => {
                             unsubscribeTheta = openmct.telemetry.subscribe(obj, datum => {
-                                theta = datum.value;
+                                theta = Number(datum.value) || 0;
                                 render();
                             });
                         });
@@ -167,56 +225,84 @@
             }
         });
 
-        // WebSocket y Telemetría
+        // WebSocket y Telemetría con soporte para múltiples suscriptores simultáneos
         const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
         const ws = new WebSocket(`${wsProtocol}//${window.location.host}`);
         const listeners = {};
 
         ws.onmessage = function (event) {
             const packet = JSON.parse(event.data);
-            if (listeners[packet.id]) {
-                listeners[packet.id]({
-                    id: packet.id,
-                    utc: packet.utc,
-                    value: packet.value
+            const cbs = listeners[packet.id];
+            if (cbs) {
+                const datum = { id: packet.id, utc: packet.utc, value: packet.value };
+                cbs.forEach(cb => {
+                    try { cb(datum); } catch(e) { console.error(e); }
                 });
             }
         };
 
         openmct.telemetry.addProvider({
-            // 1. Soporte de Metadatos (Corrige el TypeError en TelemetryTableViewProvider)
             supportsMetadata: function (domainObject) {
                 return Boolean(domainObject.telemetry);
             },
             getMetadata: function (domainObject) {
                 return domainObject.telemetry;
             },
-
-            // 2. Suscripción en tiempo real (Acepta cualquier objeto con campo telemetry)
             supportsSubscribe: function (domainObject) {
                 return Boolean(domainObject.telemetry);
             },
             subscribe: function (domainObject, callback) {
-                listeners[domainObject.identifier.key] = callback;
+                const key = domainObject.identifier.key;
+                if (!listeners[key]) listeners[key] = new Set();
+                listeners[key].add(callback);
                 return function unsubscribe() {
-                    delete listeners[domainObject.identifier.key];
+                    if (listeners[key]) {
+                        listeners[key].delete(callback);
+                        if (listeners[key].size === 0) delete listeners[key];
+                    }
                 };
             },
-
-            // 3. Solicitud de datos históricos (Elimina el error Missing request provider)
             supportsRequest: function (domainObject) {
                 return Boolean(domainObject.telemetry);
             },
             request: function (domainObject, options) {
-                // Si no tienes base de datos histórica, resuelve una lista vacía para no bloquear la gráfica
                 return Promise.resolve([]);
             }
         });
 
-        // Cargar diccionario y generar la composición
-        fetch('/dictionary.json')
-            .then(res => res.json())
-            .then(dictionary => {
+        // Cargar diccionario y los layouts compartidos
+        Promise.all([
+            fetch('/dictionary.json').then(res => res.json()),
+            fetch('/Centro%20de%20Control.json').then(res => res.json()).catch(() => null),
+            fetch('/Vista%20RPM.json').then(res => res.json()).catch(() => null)
+        ])
+            .then(([dictionary, fullDashboardBundle, rpmBundle]) => {
+                const customLayouts = {};
+
+                if (rpmBundle && rpmBundle.openmct && rpmBundle.rootId) {
+                    const l = rpmBundle.openmct[rpmBundle.rootId];
+                    l.identifier = { namespace: 'rover.spacecraft', key: 'vista_rpm' };
+                    l.location = 'rover.spacecraft:rover';
+                    customLayouts['vista_rpm'] = l;
+                    dictionary.measurements.unshift({
+                        name: "📊 " + (l.name || "Vista RPM"),
+                        key: "vista_rpm",
+                        type: "flexible-layout"
+                    });
+                }
+
+                if (fullDashboardBundle && fullDashboardBundle.openmct && fullDashboardBundle.rootId) {
+                    const l = fullDashboardBundle.openmct[fullDashboardBundle.rootId];
+                    l.identifier = { namespace: 'rover.spacecraft', key: 'centro_control' };
+                    l.location = 'rover.spacecraft:rover';
+                    customLayouts['centro_control'] = l;
+                    dictionary.measurements.unshift({
+                        name: "🚀 " + (l.name || "Centro de Control Rover"),
+                        key: "centro_control",
+                        type: "flexible-layout"
+                    });
+                }
+
                 openmct.objects.addProvider('rover.spacecraft', {
                     get: async function (identifier) {
                         if (identifier.key === 'rover') {
@@ -226,6 +312,10 @@
                                 type: 'folder',
                                 location: 'ROOT'
                             };
+                        }
+
+                        if (customLayouts[identifier.key]) {
+                            return customLayouts[identifier.key];
                         }
                         
                         const measurement = dictionary.measurements.find(m => m.key === identifier.key);
@@ -237,7 +327,16 @@
                             };
                         }
 
-                        // robusto: respeta type del dictionary (telemetry.panel para mapa)
+                        if (identifier.key === 'rover_trajectory') {
+                            return {
+                                identifier: identifier,
+                                name: measurement.name,
+                                type: 'rover.trajectory',
+                                location: 'rover.spacecraft:rover'
+                            };
+                        }
+
+                        // tipo estándar de telemetría para las demás variables
                         const objType = measurement.type || 'telemetry';
                         
                         return {
@@ -266,22 +365,13 @@
                     }
                 });
 
+                // Solo la raíz 'rover' contiene la lista de elementos (el Mapa 2D ya no es carpeta)
                 openmct.composition.addProvider({
                     appliesTo: function (domainObject) {
                         return domainObject.identifier.namespace === 'rover.spacecraft' &&
-                            (domainObject.identifier.key === 'rover' ||
-                             domainObject.identifier.key === 'rover_trajectory');
+                            domainObject.identifier.key === 'rover';
                     },
                     load: async function (domainObject) {
-                        // El panel del mapa contiene sus 3 fuentes: X, Y, theta.
-                        // Así las vistas nativas del panel (plot/tabla) también tienen datos.
-                        if (domainObject.identifier.key === 'rover_trajectory') {
-                            return [
-                                { namespace: 'rover.spacecraft', key: 'pos_x' },
-                                { namespace: 'rover.spacecraft', key: 'pos_y' },
-                                { namespace: 'rover.spacecraft', key: 'pos_theta' }
-                            ];
-                        }
                         return dictionary.measurements.map(m => ({
                             namespace: 'rover.spacecraft',
                             key: m.key

@@ -1,0 +1,122 @@
+{
+  "openmct": {
+    "rover-dashboard-full": {
+      "identifier": {
+        "key": "rover-dashboard-full",
+        "namespace": ""
+      },
+      "name": "Centro de Control Rover",
+      "type": "flexible-layout",
+      "configuration": {
+        "containers": [
+          {
+            "id": "c-map-nav",
+            "size": 50,
+            "frames": [
+              {
+                "id": "f-map-2d",
+                "domainObjectIdentifier": {
+                  "namespace": "rover.spacecraft",
+                  "key": "rover_trajectory"
+                },
+                "size": 70,
+                "noFrame": false
+              },
+              {
+                "id": "f-vel-v",
+                "domainObjectIdentifier": {
+                  "namespace": "rover.spacecraft",
+                  "key": "vel_v"
+                },
+                "size": 30,
+                "noFrame": false
+              }
+            ]
+          },
+          {
+            "id": "c-motors-left",
+            "size": 25,
+            "frames": [
+              {
+                "id": "f-m-izq1",
+                "domainObjectIdentifier": {
+                  "namespace": "rover.spacecraft",
+                  "key": "rpm_m_izq1"
+                },
+                "size": 34,
+                "noFrame": false
+              },
+              {
+                "id": "f-m-izq2",
+                "domainObjectIdentifier": {
+                  "namespace": "rover.spacecraft",
+                  "key": "rpm_m_izq2"
+                },
+                "size": 33,
+                "noFrame": false
+              },
+              {
+                "id": "f-m-izq3",
+                "domainObjectIdentifier": {
+                  "namespace": "rover.spacecraft",
+                  "key": "rpm_m_izq3"
+                },
+                "size": 33,
+                "noFrame": false
+              }
+            ]
+          },
+          {
+            "id": "c-motors-right",
+            "size": 25,
+            "frames": [
+              {
+                "id": "f-m-der1",
+                "domainObjectIdentifier": {
+                  "namespace": "rover.spacecraft",
+                  "key": "rpm_m_der1"
+                },
+                "size": 34,
+                "noFrame": false
+              },
+              {
+                "id": "f-m-der2",
+                "domainObjectIdentifier": {
+                  "namespace": "rover.spacecraft",
+                  "key": "rpm_m_der2"
+                },
+                "size": 33,
+                "noFrame": false
+              },
+              {
+                "id": "f-m-der3",
+                "domainObjectIdentifier": {
+                  "namespace": "rover.spacecraft",
+                  "key": "rpm_m_der3"
+                },
+                "size": 33,
+                "noFrame": false
+              }
+            ]
+          }
+        ],
+        "rowsLayout": true,
+        "objectStyles": {
+          "selectedConditionId": ""
+        }
+      },
+      "composition": [
+        { "namespace": "rover.spacecraft", "key": "rover_trajectory" },
+        { "namespace": "rover.spacecraft", "key": "vel_v" },
+        { "namespace": "rover.spacecraft", "key": "rpm_m_izq1" },
+        { "namespace": "rover.spacecraft", "key": "rpm_m_izq2" },
+        { "namespace": "rover.spacecraft", "key": "rpm_m_izq3" },
+        { "namespace": "rover.spacecraft", "key": "rpm_m_der1" },
+        { "namespace": "rover.spacecraft", "key": "rpm_m_der2" },
+        { "namespace": "rover.spacecraft", "key": "rpm_m_der3" }
+      ],
+      "location": "rover.spacecraft:rover"
+    }
+  },
+  "rootId": "rover-dashboard-full"
+}
