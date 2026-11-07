@@ -24,7 +24,15 @@ if __name__ == "__main__":
     except Exception as e:
         print(f"⚠️ Alerta: No se pudo conectar al ESP32 ({e}). Iniciando en modo seguro sin serial.")
 
-    # 2. Odometría (Evitamos que bloquee el flujo si no hay ESP)
+    # 2. Inicialización de la cámara ZED (Protegida contra hardware faltante)
+    try:
+        print("📷 Inicializando Cámara ZED...")
+        zed = ZEDShared().start()
+    except Exception as e: 
+        print("Warning: Cámara ZED no encontrada!")
+        zed = None
+
+    # 3. Odometría (Evitamos que bloquee el flujo si no hay ESP)
     try:
         odo = RoverOdometry(esp=esp)
     except Exception as e:
@@ -38,12 +46,6 @@ if __name__ == "__main__":
             def reset_pose(self): pass
         odo = DummyOdo()
 
-    try:
-        print("📷 Inicializando Cámara ZED...")
-        zed = ZEDShared().start()
-    except Exception as e: 
-        print("Warning: Cámara ZED no encontrada!")
-        zed = None
     
     # CRUCIAL: Le damos 3 segundos exactos a C++ para abrir la cámara
     # y evitar que choque con el arranque de los hilos de Python.

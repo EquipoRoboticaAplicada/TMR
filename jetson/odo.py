@@ -74,14 +74,14 @@ class RoverOdometry:
 
             # Promedio ponderado si hay 3 motores, fallback al primero disponible
             if len(m_l) >= 3:
-                v_l = m_l[0]["m/s"] * 0.1 + m_l[1]["m/s"] * 0.8 + m_l[2]["m/s"] * 0.1
+                v_l = m_l[0]["m/s"] * 0.33 + m_l[1]["m/s"] * 0.33 + m_l[2]["m/s"] * 0.34
             elif len(m_l) > 0:
                 v_l = m_l[0]["m/s"]
             else:
                 v_l = 0.0
 
             if len(m_r) >= 3:
-                v_r = m_r[0]["m/s"] * 0.1 + m_r[1]["m/s"] * 0.8 + m_r[2]["m/s"] * 0.1
+                v_r = m_r[0]["m/s"] * 0.33 + m_r[1]["m/s"] * 0.33 + m_r[2]["m/s"] * 0.34
             elif len(m_r) > 0:
                 v_r = m_r[0]["m/s"]
             else:
