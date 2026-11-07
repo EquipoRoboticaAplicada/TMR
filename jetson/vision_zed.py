@@ -22,8 +22,16 @@ class ZEDShared:
                  confidence_threshold=50):
 
         self.lock = threading.Lock()
+        # Serializa grab/retrieve con los cambios de ajustes de cámara
+        # (exposición, ganancia, balance de blancos) que llegan desde otros hilos.
+        self._zed_lock = threading.Lock()
         self.stop_event = threading.Event()
         self.thread = None
+
+        # Se guardan para validar contra lo que se usó al calibrar:
+        # EXPOSURE en la ZED es un % del periodo de frame, así que depende de los fps.
+        self.fps = fps
+        self.resolution = resolution
 
         self.zed = sl.Camera()
 
@@ -71,10 +79,13 @@ class ZEDShared:
 
     def _run(self):
         while not self.stop_event.is_set():
-            if self.zed.grab(self.runtime) == sl.ERROR_CODE.SUCCESS:
-                self.zed.retrieve_image(self.image_mat, sl.VIEW.LEFT)
-                self.zed.retrieve_measure(self.depth_mat, sl.MEASURE.DEPTH)
+            with self._zed_lock:
+                grabbed = self.zed.grab(self.runtime) == sl.ERROR_CODE.SUCCESS
+                if grabbed:
+                    self.zed.retrieve_image(self.image_mat, sl.VIEW.LEFT)
+                    self.zed.retrieve_measure(self.depth_mat, sl.MEASURE.DEPTH)
 
+            if grabbed:
                 img = self.image_mat.get_data()
                 if img is None:
                     continue
@@ -144,6 +155,74 @@ class ZEDShared:
                         vals.append(float(d))
         return float(np.median(vals)) if vals else None
 
+    # ---------------- Ajustes de cámara (exposición / ganancia / WB) ----------------
+    #
+    # En AUTO la ZED reajusta exposición, ganancia y balance de blancos según la
+    # escena, y con eso se mueven los valores HSV de los objetos aunque los objetos
+    # no cambien. Para que la calibración de colores sirva, la cámara tiene que
+    # estar en los MISMOS valores fijos al calibrar y al operar.
+
+    def _read_setting(self, setting):
+        res = self.zed.get_camera_settings(setting)
+        if isinstance(res, tuple):          # SDK 4.x -> (ERROR_CODE, valor)
+            err, val = res[0], res[-1]
+            if err != sl.ERROR_CODE.SUCCESS:
+                return None
+            return int(val)
+        return None if res is None else int(res)   # SDK 3.x -> valor
+
+    def _write_setting(self, setting, value):
+        err = self.zed.set_camera_settings(setting, int(value))
+        # SDK 4.x regresa ERROR_CODE; SDK 3.x regresa None
+        if err is not None and err != sl.ERROR_CODE.SUCCESS:
+            print(f"[ZED] No se pudo ajustar {setting} = {value}: {err}")
+            return False
+        return True
+
+    def get_camera_settings(self):
+        """Valores actuales. En AUTO, exposure/gain/wb son los que eligió la cámara."""
+        with self._zed_lock:
+            return {
+                "aec_agc":                  self._read_setting(sl.VIDEO_SETTINGS.AEC_AGC),
+                "exposure":                 self._read_setting(sl.VIDEO_SETTINGS.EXPOSURE),
+                "gain":                     self._read_setting(sl.VIDEO_SETTINGS.GAIN),
+                "whitebalance_auto":        self._read_setting(sl.VIDEO_SETTINGS.WHITEBALANCE_AUTO),
+                "whitebalance_temperature": self._read_setting(sl.VIDEO_SETTINGS.WHITEBALANCE_TEMPERATURE),
+            }
+
+    def set_auto_camera(self, exposure=True, whitebalance=True):
+        with self._zed_lock:
+            if exposure:
+                self._write_setting(sl.VIDEO_SETTINGS.AEC_AGC, 1)
+            if whitebalance:
+                self._write_setting(sl.VIDEO_SETTINGS.WHITEBALANCE_AUTO, 1)
+
+    def set_manual_camera(self, exposure=None, gain=None, whitebalance_temperature=None):
+        """
+        Fija los valores dados (None = no tocar ese ajuste).
+        Escribir EXPOSURE/GAIN apaga AEC_AGC y escribir la temperatura apaga
+        WHITEBALANCE_AUTO, así que con esto la cámara queda en manual.
+        Regresa los valores que se aplicaron (ya acotados a rangos válidos).
+        """
+        applied = {}
+        with self._zed_lock:
+            if exposure is not None or gain is not None:
+                self._write_setting(sl.VIDEO_SETTINGS.AEC_AGC, 0)
+            if exposure is not None:
+                exposure = int(np.clip(exposure, 0, 100))
+                if self._write_setting(sl.VIDEO_SETTINGS.EXPOSURE, exposure):
+                    applied["exposure"] = exposure
+            if gain is not None:
+                gain = int(np.clip(gain, 0, 100))
+                if self._write_setting(sl.VIDEO_SETTINGS.GAIN, gain):
+                    applied["gain"] = gain
+            if whitebalance_temperature is not None:
+                wb = int(round(np.clip(whitebalance_temperature, 2800, 6500) / 100.0) * 100)
+                self._write_setting(sl.VIDEO_SETTINGS.WHITEBALANCE_AUTO, 0)
+                if self._write_setting(sl.VIDEO_SETTINGS.WHITEBALANCE_TEMPERATURE, wb):
+                    applied["whitebalance_temperature"] = wb
+        return applied
+
     def stop(self):
         self.stop_event.set()
         if self.thread is not None:
@@ -163,13 +242,83 @@ MIN_AREA = 600
 KERNEL = cv.getStructuringElement(cv.MORPH_ELLIPSE, (5, 5))
 
 
-def load_color_ranges():
+# Si es False, en operación solo se fija el balance de blancos y la exposición
+# queda en AUTO. Útil si la iluminación del área cambia muchísimo de una zona a
+# otra; con True (recomendado) la imagen es idéntica a la de la calibración.
+LOCK_EXPOSURE_AT_RUNTIME = True
+
+
+def load_calibration():
+    """
+    Formato actual de colors.json:
+        {
+          "version": 2,
+          "camera": {"exposure": .., "gain": .., "whitebalance_temperature": ..},
+          "colors": {"red": [{"lower": [h,s,v], "upper": [h,s,v]}, ...], ...},
+          "meta":   {"fps": .., "resolution": .., "created": .., "stats": {..}}
+        }
+    También acepta el formato viejo ({"red": {...}, "blue": [...]}) sin ajustes de cámara.
+    """
+    empty = {"colors": {}, "camera": None, "meta": {}}
     try:
         with open(color_file, "r", encoding="utf-8") as f:
-            return json.load(f)
+            data = json.load(f)
     except FileNotFoundError as e:
         print(f"Error al cargar {color_file}: {e}")
-        return {}
+        return empty
+    except json.JSONDecodeError as e:
+        print(f"{color_file} está corrupto o incompleto: {e}")
+        return empty
+
+    if not isinstance(data, dict):
+        return empty
+
+    if isinstance(data.get("colors"), dict):
+        return {
+            "colors": data["colors"],
+            "camera": data.get("camera"),
+            "meta":   data.get("meta", {}),
+        }
+
+    # Formato viejo: todo el archivo son colores
+    colors = {k: v for k, v in data.items() if isinstance(v, (dict, list))}
+    return {"colors": colors, "camera": None, "meta": {}}
+
+
+def load_color_ranges():
+    return load_calibration()["colors"]
+
+
+def apply_saved_camera_settings(zed_shared, calibration):
+    """Pone la ZED en los mismos ajustes fijos que se usaron al calibrar."""
+    if zed_shared is None:
+        return
+
+    cam = calibration.get("camera")
+    if not cam:
+        print("⚠️ [vision] colors.json no trae ajustes de cámara: la ZED queda en AUTO "
+              "y los colores pueden variar. Recalibra con calibracion.py.")
+        return
+
+    meta = calibration.get("meta", {})
+    if meta.get("fps") is not None and meta["fps"] != zed_shared.fps:
+        print(f"⚠️ [vision] Calibrado a {meta['fps']} fps pero la ZED corre a {zed_shared.fps} fps. "
+              "La exposición es % del periodo de frame, así que la imagen no será igual.")
+    if meta.get("resolution") is not None and meta["resolution"] != zed_shared.resolution:
+        print(f"⚠️ [vision] Calibrado en {meta['resolution']} pero la ZED corre en {zed_shared.resolution}.")
+
+    if LOCK_EXPOSURE_AT_RUNTIME:
+        applied = zed_shared.set_manual_camera(
+            exposure=cam.get("exposure"),
+            gain=cam.get("gain"),
+            whitebalance_temperature=cam.get("whitebalance_temperature"),
+        )
+    else:
+        zed_shared.set_auto_camera(exposure=True, whitebalance=False)
+        applied = zed_shared.set_manual_camera(
+            whitebalance_temperature=cam.get("whitebalance_temperature"),
+        )
+    print(f"📷 [vision] Cámara fijada con la calibración: {applied}")
 
 
 def process_mask(mask):
@@ -206,29 +355,37 @@ def find_and_draw(mask, frame_draw, label, draw=True):
     return found, detected_centroids, areas
 
 
+def preprocess_hsv(frame_bgr):
+    """Mismo preprocesamiento en calibración y en operación."""
+    blurred = cv.GaussianBlur(frame_bgr, (5, 5), 0)
+    return cv.cvtColor(blurred, cv.COLOR_BGR2HSV)
+
+
+def build_mask(hsv, ranges):
+    """ranges: un dict {"lower","upper"} o una lista de ellos (wrap del rojo). None si no es válido."""
+    if isinstance(ranges, dict):
+        ranges = [ranges]
+    if not isinstance(ranges, list):
+        return None
+    mask = None
+    for r in ranges:
+        lower = np.array(r["lower"], dtype=np.uint8)
+        upper = np.array(r["upper"], dtype=np.uint8)
+        m     = cv.inRange(hsv, lower, upper)
+        mask  = m if mask is None else cv.bitwise_or(mask, m)
+    return mask
+
+
 def detect_colors(frame, color_ranges, draw=False):
     colors    = []
     centroids = []
     areas     = []
 
-    blurred = cv.GaussianBlur(frame, (5, 5), 0)
-    hsv     = cv.cvtColor(blurred, cv.COLOR_BGR2HSV)
+    hsv = preprocess_hsv(frame)
 
     for color, ranges in color_ranges.items():
-        if isinstance(ranges, dict):
-            lower = np.array(ranges["lower"], dtype=np.uint8)
-            upper = np.array(ranges["upper"], dtype=np.uint8)
-            mask  = cv.inRange(hsv, lower, upper)
-        elif isinstance(ranges, list):
-            mask = None
-            for r in ranges:
-                lower = np.array(r["lower"], dtype=np.uint8)
-                upper = np.array(r["upper"], dtype=np.uint8)
-                m     = cv.inRange(hsv, lower, upper)
-                mask  = m if mask is None else cv.bitwise_or(mask, m)
-            if mask is None:
-                continue
-        else:
+        mask = build_mask(hsv, ranges)
+        if mask is None:
             continue
 
         mask = process_mask(mask)
@@ -256,7 +413,11 @@ def pick_target(centroids, areas, area_min=1500):
 class VisionZED:
     def __init__(self, zed_shared, area_min=500, draw_local=False):
         self.zed         = zed_shared
-        self.color_ranges = load_color_ranges()
+        calibration      = load_calibration()
+        self.color_ranges = calibration["colors"]
+        if not self.color_ranges:
+            print("⚠️ [vision] No hay colores calibrados en colors.json.")
+        apply_saved_camera_settings(self.zed, calibration)
         self.area_min    = area_min
         self.draw_local  = draw_local
 
