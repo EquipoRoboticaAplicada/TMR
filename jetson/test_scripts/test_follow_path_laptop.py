@@ -8,14 +8,20 @@ Omite a propósito la cámara ZED, el pipeline de visión y MQTT: no importa
 vision_zed (pyzed) ni server (paho), así que corre sin esos SDKs instalados.
 
 Uso (desde jetson/):
-    python test_scripts/test_follow_path_laptop.py                      # 1 m recto
-    python test_scripts/test_follow_path_laptop.py --path square        # cuadrado de 1 m
+    python test_scripts/test_follow_path_laptop.py                      # cuadrado de 1 m
+    python test_scripts/test_follow_path_laptop.py --path line          # 1 m recto
     python test_scripts/test_follow_path_laptop.py --path "1,0;1,1"     # ruta propia
     python test_scripts/test_follow_path_laptop.py --alpha 0.85         # fusiona IMU
+    python test_scripts/test_follow_path_laptop.py --no-viz             # sin ventana
+
+Visualizador (pygame, rover_viz.py): muestra la ruta planeada, la trayectoria
+por odometría y la pose del rover. ESPACIO arranca, ESC/Q o cerrar la ventana
+es PARO, S guarda una captura. Si pygame no está instalado, sigue sin ventana.
 
 Seguridad:
     - Aborta si no detecta ESP_L y ESP_R, o si dejan de mandar telemetría.
-    - Detiene el rover al terminar, al llegar a --timeout o con Ctrl+C.
+    - Detiene el rover al terminar, al llegar a --timeout, con Ctrl+C o al
+      cerrar la ventana / presionar ESC.
 """
 import os
 import sys
@@ -25,6 +31,7 @@ import argparse
 import math
 import threading
 import time
+from types import SimpleNamespace
 
 from connect import ESP
 from odo import RoverOdometry
@@ -46,6 +53,10 @@ PRESETS = {
 TELEMETRY_WAIT_S  = 3.0   # espera inicial de líneas ESP_L/ESP_R antes de arrancar
 TELEMETRY_STALE_S = 1.0   # sin datos de motores por más de esto → abortar
 STATUS_EVERY_S    = 0.5   # cada cuánto imprimir la pose
+LOOP_SLEEP_S      = 0.05  # periodo del monitoreo cuando no hay ventana
+
+# Solo para dibujar: mantener igual a DIST_TOLERANCE de follow_path (command.py)
+WAYPOINT_TOLERANCE_M = 0.01
 
 
 # ------------------------------------------------------------------ #
@@ -79,8 +90,8 @@ def parse_args(argv=None):
         description="Prueba de follow_path con ESP32 por serial (sin ZED ni MQTT)."
     )
     p.add_argument(
-        "--path", type=parse_path, default=PRESETS["line"],
-        help=f"Preset {list(PRESETS)} o puntos 'x,y;x,y;...' en metros. Default: line.",
+        "--path", type=parse_path, default=PRESETS["square"],
+        help=f"Preset {list(PRESETS)} o puntos 'x,y;x,y;...' en metros. Default: square.",
     )
     p.add_argument(
         "--alpha", type=parse_alpha, default=1.0,
@@ -93,7 +104,11 @@ def parse_args(argv=None):
     )
     p.add_argument(
         "--yes", action="store_true",
-        help="Arrancar sin esperar Enter.",
+        help="Arrancar sin esperar confirmación (Enter o ESPACIO en la ventana).",
+    )
+    p.add_argument(
+        "--no-viz", dest="viz", action="store_false",
+        help="No abrir el visualizador pygame.",
     )
     return p.parse_args(argv)
 
@@ -123,6 +138,33 @@ def print_status(odo, rvr_cmd, elapsed: float):
     print(f"[t={elapsed:5.1f}s] pose x={x:+.3f} y={y:+.3f} θ={math.degrees(theta):+7.2f}°  {target}")
 
 
+def open_viz(path, track_width_m):
+    """Abre la ventana pygame. Regresa None si pygame no está disponible."""
+    try:
+        from rover_viz import RoverViz
+    except ImportError as e:
+        print(f"⚠️  Visualizador desactivado ({e}). Instálalo con: pip install pygame")
+        return None
+    return RoverViz(path=path, tolerance_m=WAYPOINT_TOLERANCE_M, track_width_m=track_width_m)
+
+
+def feed_viz(viz, odo, rvr_cmd, alpha):
+    viz.update(
+        pose=odo.pose,
+        target_index=rvr_cmd.current_index,
+        velocity=odo.velocity,
+        fused_theta=rvr_cmd._fused_theta if alpha < 1.0 else None,
+    )
+
+
+def fail(ctx, msg: str, rc: int = 1) -> int:
+    """Reporta un aborto en consola y en la ventana (si hay)."""
+    print(f"❌ {msg}")
+    if ctx.viz is not None:
+        ctx.viz.set_finished(msg, ok=False)
+    return rc
+
+
 def shutdown(esp, sender, odo):
     """Detiene el rover. El stop a motores va antes de cualquier cosa que pueda fallar."""
     # 1) Cortar el único escritor al ESP para que follow_path ya no mande comandos
@@ -147,91 +189,125 @@ def shutdown(esp, sender, odo):
 # ------------------------------------------------------------------ #
 
 def run(args) -> int:
-    esp    = ESP()
-    odo    = None
-    sender = None
+    esp = ESP()
+    ctx = SimpleNamespace(odo=None, sender=None, viz=None)
 
     try:
-        # 1. Conexión serial
-        esp.connect()
-        missing = [name for name, ser in (("ESP_L", esp._ser_left), ("ESP_R", esp._ser_right))
-                   if ser is None]
-        if missing:
-            print(f"❌ No se detectó {', '.join(missing)}. Revisa los cables USB y el monitor serial.")
-            return 1
-        if args.alpha < 1.0 and esp._ser_sensores is None:
-            print("❌ --alpha < 1.0 necesita el ESP de sensores (IMU) y no se detectó.\n"
-                  "   Sin él, heading se queda en 0.0 y la fusión distorsiona el ángulo.")
-            return 1
-        esp.send_uart("0", "0")
+        rc = _run_route(args, esp, ctx)
+    except KeyboardInterrupt:
+        print("\nCtrl+C recibido.")
+        if ctx.viz is not None:
+            ctx.viz.set_finished("PARO: Ctrl+C", ok=False)
+        rc = 130
+    finally:
+        shutdown(esp, ctx.sender, ctx.odo)
 
-        if not wait_for_telemetry(esp, TELEMETRY_WAIT_S):
-            print(f"❌ Los ESP de motores no mandaron telemetría en {TELEMETRY_WAIT_S:.0f} s.")
-            return 1
+    # El rover ya está detenido: la ventana se queda con el resultado
+    if ctx.viz is not None:
+        try:
+            print("Ventana abierta con el resultado (ESC/Q o cerrar para salir, S para captura).")
+            ctx.viz.hold()
+        except KeyboardInterrupt:
+            pass
+        finally:
+            ctx.viz.close()
+    return rc
 
-        # 2. Odometría, sender y ruta (sin visión: el override nunca se activa)
-        odo    = RoverOdometry(esp=esp)
-        sender = SenderJetson(esp=esp).start()
-        rvr_cmd = Route_Command(
-            sender=sender,
-            vision_override_event=threading.Event(),
-            path=list(args.path),
-            esp=esp,
-        )
-        rvr_cmd.cf_alpha = args.alpha
 
-        print("\n──────── Prueba follow_path ────────")
-        print(f"Ruta     : {rvr_cmd.path}")
-        print(f"cf_alpha : {args.alpha}" + ("  (solo odometría)" if args.alpha == 1.0 else "  (fusión con IMU)"))
-        print(f"Timeout  : {args.timeout:.0f} s")
-        print("Origen   : pose actual del rover, mirando hacia +x")
-        print("────────────────────────────────────")
+def _run_route(args, esp, ctx) -> int:
+    # 1. Conexión serial
+    esp.connect()
+    missing = [name for name, ser in (("ESP_L", esp._ser_left), ("ESP_R", esp._ser_right))
+               if ser is None]
+    if missing:
+        return fail(ctx, f"No se detectó {', '.join(missing)}. Revisa los cables USB y el monitor serial.")
+    if args.alpha < 1.0 and esp._ser_sensores is None:
+        return fail(ctx, "--alpha < 1.0 necesita el ESP de sensores (IMU) y no se detectó. "
+                         "Sin él, heading se queda en 0.0 y la fusión distorsiona el ángulo.")
+    esp.send_uart("0", "0")
 
-        if not args.yes:
+    if not wait_for_telemetry(esp, TELEMETRY_WAIT_S):
+        return fail(ctx, f"Los ESP de motores no mandaron telemetría en {TELEMETRY_WAIT_S:.0f} s.")
+
+    # 2. Odometría, sender y ruta (sin visión: el override nunca se activa)
+    odo = ctx.odo = RoverOdometry(esp=esp)
+    ctx.sender = SenderJetson(esp=esp).start()
+    rvr_cmd = Route_Command(
+        sender=ctx.sender,
+        vision_override_event=threading.Event(),
+        path=list(args.path),
+        esp=esp,
+    )
+    rvr_cmd.cf_alpha = args.alpha
+
+    print("\n──────── Prueba follow_path ────────")
+    print(f"Ruta     : {rvr_cmd.path}")
+    print(f"cf_alpha : {args.alpha}" + ("  (solo odometría)" if args.alpha == 1.0 else "  (fusión con IMU)"))
+    print(f"Timeout  : {args.timeout:.0f} s")
+    print("Origen   : pose actual del rover, mirando hacia +x")
+    print("────────────────────────────────────")
+
+    viz = ctx.viz = open_viz(rvr_cmd.path, odo.L) if args.viz else None
+
+    # 3. Confirmación de arranque
+    if not args.yes:
+        if viz is not None:
+            print("En la ventana: ESPACIO/Enter arranca, ESC cancela.")
+            while True:
+                feed_viz(viz, odo, rvr_cmd, args.alpha)
+                action = viz.tick()
+                if action == "start":
+                    break
+                if action == "quit":
+                    return fail(ctx, "Cancelado desde la ventana.")
+        else:
             try:
                 input("Coloca el rover en el origen y presiona Enter para arrancar (Ctrl+C cancela)... ")
             except EOFError:
-                print("Cancelado.")
-                return 1
+                return fail(ctx, "Cancelado.")
 
-        # 3. Odometría desde cero justo al arrancar
-        odo.reset_pose()
-        route_thread = threading.Thread(target=rvr_cmd.follow_path, args=(odo,), daemon=True)
-        t0 = time.time()
-        route_thread.start()
+    # 4. Odometría desde cero justo al arrancar
+    odo.reset_pose()
+    if viz is not None:
+        viz.set_running()
+    route_thread = threading.Thread(target=rvr_cmd.follow_path, args=(odo,), daemon=True)
+    t0 = time.time()
+    route_thread.start()
 
-        # 4. Monitoreo con watchdogs (loop con sleep para que Ctrl+C responda en Windows)
-        last_status = 0.0
-        while route_thread.is_alive():
-            now     = time.time()
-            elapsed = now - t0
+    # 5. Monitoreo con watchdogs. Corre en el hilo principal (pygame lo requiere)
+    #    y sin bloqueos largos para que Ctrl+C responda en Windows.
+    last_status = 0.0
+    while route_thread.is_alive():
+        now     = time.time()
+        elapsed = now - t0
 
-            if elapsed > args.timeout:
-                print(f"⏱️  Timeout de {args.timeout:.0f} s alcanzado.")
-                print_status(odo, rvr_cmd, elapsed)
-                return 1
-            if esp._ser_left is None or esp._ser_right is None:
-                print("❌ Se perdió la conexión serial con un ESP de motores.")
-                return 1
-            age = now - esp.get_rover_state()["last_update"]
-            if age > TELEMETRY_STALE_S:
-                print(f"❌ Telemetría de motores congelada ({age:.1f} s sin datos). La odometría está ciega.")
-                return 1
+        if elapsed > args.timeout:
+            print_status(odo, rvr_cmd, elapsed)
+            return fail(ctx, f"Timeout de {args.timeout:.0f} s alcanzado.")
+        if esp._ser_left is None or esp._ser_right is None:
+            return fail(ctx, "Se perdió la conexión serial con un ESP de motores.")
+        age = now - esp.get_rover_state()["last_update"]
+        if age > TELEMETRY_STALE_S:
+            return fail(ctx, f"Telemetría de motores congelada ({age:.1f} s sin datos). "
+                             "La odometría está ciega.")
 
-            if now - last_status >= STATUS_EVERY_S:
-                print_status(odo, rvr_cmd, elapsed)
-                last_status = now
-            time.sleep(0.05)
+        if now - last_status >= STATUS_EVERY_S:
+            print_status(odo, rvr_cmd, elapsed)
+            last_status = now
 
-        print("✅ Ruta terminada.")
-        print_status(odo, rvr_cmd, time.time() - t0)
-        return 0
+        if viz is not None:
+            feed_viz(viz, odo, rvr_cmd, args.alpha)
+            if viz.tick() == "quit":
+                return fail(ctx, "PARO desde la ventana.")
+        else:
+            time.sleep(LOOP_SLEEP_S)
 
-    except KeyboardInterrupt:
-        print("\nCtrl+C recibido.")
-        return 130
-    finally:
-        shutdown(esp, sender, odo)
+    print("✅ Ruta terminada.")
+    print_status(odo, rvr_cmd, time.time() - t0)
+    if viz is not None:
+        feed_viz(viz, odo, rvr_cmd, args.alpha)
+        viz.set_finished("Ruta terminada", ok=True)
+    return 0
 
 
 if __name__ == "__main__":

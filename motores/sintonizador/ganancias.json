@@ -1,0 +1,18 @@
+{
+  "_comentario": "PID en forma ideal u = Kp*[e + (1/Ti)*integral(e) + Td*de/dt], filtro Td/N. Ti = 0 sin integral, Td = 0 sin derivada, N = 0 sin filtro. A = aceleracion, F = frenado. L = izquierdo (ESP_L), R = derecho (ESP_R). TS en ms, BANDA en rpm, UMAX en PWM.",
+  "config": {"UMAX": 255.0, "TS": 100, "BANDA": 0.5, "DMODE": "E"},
+  "motores": {
+    "L0": {"A": {"Kp": 0.5, "Ti": 0.5, "Td": 0.0, "N": 10.0},
+           "F": {"Kp": 0.5, "Ti": 0.5, "Td": 0.0, "N": 10.0}},
+    "L1": {"A": {"Kp": 0.5, "Ti": 0.5, "Td": 0.0, "N": 10.0},
+           "F": {"Kp": 0.5, "Ti": 0.5, "Td": 0.0, "N": 10.0}},
+    "L2": {"A": {"Kp": 0.5, "Ti": 0.5, "Td": 0.0, "N": 10.0},
+           "F": {"Kp": 0.5, "Ti": 0.5, "Td": 0.0, "N": 10.0}},
+    "R0": {"A": {"Kp": 0.5, "Ti": 0.5, "Td": 0.0, "N": 10.0},
+           "F": {"Kp": 0.5, "Ti": 0.5, "Td": 0.0, "N": 10.0}},
+    "R1": {"A": {"Kp": 0.5, "Ti": 0.5, "Td": 0.0, "N": 10.0},
+           "F": {"Kp": 0.5, "Ti": 0.5, "Td": 0.0, "N": 10.0}},
+    "R2": {"A": {"Kp": 0.5, "Ti": 0.5, "Td": 0.0, "N": 10.0},
+           "F": {"Kp": 0.5, "Ti": 0.5, "Td": 0.0, "N": 10.0}}
+  }
+}
