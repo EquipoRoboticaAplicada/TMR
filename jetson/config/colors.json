@@ -1,1 +1,110 @@
-{}
+{
+    "version": 2,
+    "camera": {
+        "exposure": 25,
+        "gain": 4,
+        "whitebalance_temperature": 4700
+    },
+    "colors": {
+        "red": [
+            {
+                "lower": [
+                    172,
+                    196,
+                    62
+                ],
+                "upper": [
+                    179,
+                    255,
+                    255
+                ]
+            },
+            {
+                "lower": [
+                    0,
+                    196,
+                    62
+                ],
+                "upper": [
+                    4,
+                    255,
+                    255
+                ]
+            }
+        ],
+        "blue": [
+            {
+                "lower": [
+                    113,
+                    103,
+                    35
+                ],
+                "upper": [
+                    131,
+                    255,
+                    255
+                ]
+            }
+        ],
+        "green": [
+            {
+                "lower": [
+                    63,
+                    50,
+                    35
+                ],
+                "upper": [
+                    83,
+                    255,
+                    255
+                ]
+            }
+        ]
+    },
+    "meta": {
+        "created": "2026-11-07T10:35:52",
+        "resolution": "VGA",
+        "fps": 15,
+        "params": {
+            "P_LO": 2.0,
+            "P_HI": 98.0,
+            "MARGIN_H": 5,
+            "MARGIN_S": 30,
+            "V_MIN_FACTOR": 0.5,
+            "S_FLOOR": 50,
+            "V_FLOOR": 35
+        },
+        "stats": {
+            "red": {
+                "n_pixels": 72000,
+                "n_valid": 72000,
+                "center_h": 178.0,
+                "h_width": 12.0,
+                "s_min": 196,
+                "v_min": 62,
+                "s_median": 236,
+                "v_median": 134
+            },
+            "blue": {
+                "n_pixels": 108000,
+                "n_valid": 108000,
+                "center_h": 120.0,
+                "h_width": 18.0,
+                "s_min": 103,
+                "v_min": 35,
+                "s_median": 163,
+                "v_median": 82
+            },
+            "green": {
+                "n_pixels": 144000,
+                "n_valid": 131925,
+                "center_h": 76.0,
+                "h_width": 20.0,
+                "s_min": 50,
+                "v_min": 35,
+                "s_median": 100,
+                "v_median": 59
+            }
+        }
+    }
+}
