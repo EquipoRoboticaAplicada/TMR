@@ -7,3 +7,6 @@ __pycache__/
 *.so
 
 node_modules/
+
+# Registros de experimentos del sintonizador de motores
+motores/sintonizador/registros/
