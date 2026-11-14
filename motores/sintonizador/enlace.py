@@ -22,14 +22,15 @@ BAUD        = 115200
 LADOS       = ("L", "R")
 NOMBRE_LADO = {"L": "Izquierdo", "R": "Derecho"}
 MOTORES     = [f"{lado}{i}" for lado in LADOS for i in range(3)]   # L0 L1 L2 R0 R1 R2
-JUEGOS      = ("A", "F")
+JUEGOS      = ("REF", "PERT")   # un juego de ganancias por criterio de sintonía
+NOMBRE_JUEGO = {"REF": "Referencia", "PERT": "Perturbación"}
 CAMPOS      = ("Kp", "Ti", "Td", "N")
 
 WD_MS    = 500    # watchdog del firmware mientras la herramienta está conectada
 LATIDO_S = 0.15   # periodo del latido ("# HB": el firmware lo cuenta como comando y lo ignora)
 
-_RE_PID_ACK = re.compile(r"^# PID ([AF]) ([0-2]) (\S+) (\S+) (\S+) (\S+)$")
-_RE_CSV     = re.compile(r"^\d+,[0-2],[AFM],")
+_RE_PID_ACK = re.compile(r"^# PID (REF|PERT) ([0-2]) (\S+) (\S+) (\S+) (\S+)$")
+_RE_CSV     = re.compile(r"^\d+,[0-2],(?:M|\d+),")
 _RE_PLOT    = re.compile(r"^SP\d:")
 
 
@@ -39,7 +40,7 @@ class Muestra:
     t_esp_ms: int      # millis() del ESP32
     lado: str          # "L" | "R"
     motor: int         # 0..2
-    reg: str           # A | F | M (manual)
+    reg: str           # "M" (manual) o porcentaje del juego REF en la mezcla, "0".."100"
     sp: float
     pv: float
     e: float
@@ -212,8 +213,8 @@ class EnlaceESP:
     def configurar(self, ganancias=None, cfg=None):
         """Deja el firmware listo para la herramienta y, si se dan, le carga las ganancias.
 
-        ganancias: {"L0": {"A": {"Kp":..,"Ti":..,"Td":..,"N":..}, "F": {...}}, ...}
-        cfg: {"UMAX":.., "TS":.., "BANDA":.., "DMODE": "E"|"PV"}
+        ganancias: {"L0": {"REF": {"Kp":..,"Ti":..,"Td":..,"N":..}, "PERT": {...}}, ...}
+        cfg: {"UMAX":.., "TS":.., "BANDA":.., "TMEZ":.., "DMODE": "E"|"PV"}
         """
         for linea in ("STOP", f"WD {WD_MS}", "VER *"):
             self.enviar(linea)
@@ -225,6 +226,7 @@ class EnlaceESP:
         self.enviar(f"UMAX {fmt_num(cfg['UMAX'])}")
         self.enviar(f"TS {int(cfg['TS'])}")
         self.enviar(f"BANDA {fmt_num(cfg['BANDA'])}")
+        self.enviar(f"TMEZ {int(cfg['TMEZ'])}")
         self.enviar(f"DMODE {cfg['DMODE']}")
         for i in range(3):
             g_motor = ganancias[f"{self.lado}{i}"]

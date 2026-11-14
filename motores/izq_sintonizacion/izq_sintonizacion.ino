@@ -34,34 +34,47 @@
     Discretización con el Ts real medido: integral por Euler hacia atrás,
     derivada por diferencia hacia atrás con su filtro.
 
-  Dos juegos de ganancias por motor:
-      A = ACELERACIÓN : hay que AUMENTAR |velocidad| en el sentido de giro
-      F = FRENADO     : hay que REDUCIR |velocidad| (incluye invertir sentido)
+  Dos juegos de ganancias por motor, uno por criterio de sintonía. Los
+  calcula sintonizador.py a partir del modelo K, τ, θ de cada motor:
+      REF  = seguimiento de REFERENCIA    (ITAE ante cambios de setpoint)
+      PERT = rechazo de PERTURBACIONES    (IAE con el setpoint fijo)
 
-    El régimen se decide en cada muestra. Con |e| dentro de BANDA se conserva
-    el régimen anterior para no conmutar en estado estable. El término
-    integral se guarda en unidades de PWM: al cambiar de juego o de ganancias
-    en vivo la integral no salta; solo cambian P y D, que son chicos cerca del
-    setpoint. Al pasar de MAN a AUTO la integral absorbe la diferencia, así
-    que la salida continúa desde el PWM manual.
+    Las ganancias que actúan son una mezcla de los dos juegos, que se
+    recalcula en cada muestra con un peso alfa (porcentaje del juego REF):
+      - cuando el setpoint cambia más que BANDA, alfa = 100 %: actúa REF;
+      - cuando la velocidad llega (|e| <= BANDA), alfa baja en rampa hasta
+        0 % en TMEZ milisegundos: queda PERT regulando;
+      - REG REF / REG PERT dejan fijo un juego, para probar cada uno.
+    Se interpolan las ganancias en forma paralela (Kp, Kp/Ti, Kp·Td) y la
+    constante del filtro. El término integral se guarda en unidades de PWM:
+    al cambiar la mezcla o las ganancias en vivo la integral no salta; solo
+    cambian P y D, que son chicos cerca del setpoint. Al pasar de MAN a AUTO
+    la integral absorbe la diferencia, así que la salida continúa desde el
+    PWM manual.
 
     Anti-windup: la integral se congela si empujaría la salida más allá de
     UMAX, y se limita a ±UMAX.
 
+  Velocidad: las cuentas del encoder se dividen entre el tiempo real del
+  primer al último flanco de la muestra, no entre el periodo de muestreo. Así
+  la medición no se cuantiza y TS se puede bajar a 10-20 ms, que es lo que
+  piden motores cuya constante de tiempo es de decenas de ms.
+
   ---------------------------------------------------------------------------
    COMANDOS POR SERIAL (115200, terminar con Enter, mayúsculas o minúsculas)
   ---------------------------------------------------------------------------
-    m = motor 0, 1, 2 o * (los tres)      J = juego A, F o * (los dos)
+    m = motor 0, 1, 2 o * (los tres)      J = juego REF, PERT o * (los dos)
 
     S<rpm>                    setpoint a los 3 motores (formato de connect.py)
     SP m <rpm>                setpoint a un motor
     PID J m Kp Ti Td [N]      ganancias ideales de un juego
     KP|TI|TD|N J m <valor>    un solo parámetro
-    REG AUTO|A|F m            régimen automático, o forzar juego A / F
+    REG AUTO|REF|PERT m       mezcla automática, o dejar fijo un juego
     MAN m <pwm>               lazo abierto: PWM fijo (para identificar la planta)
     AUTO m                    regresar al PID sin salto en la salida
     UMAX <0-255>              límite de |PWM| (PID y MAN)
-    BANDA <rpm>               histéresis para cambiar de régimen
+    BANDA <rpm>               cambio de SP que activa REF y error que cuenta como "llegó"
+    TMEZ <ms>                 duración de la rampa de REF a PERT (0 = cambio directo)
     TS <ms>                   tiempo de muestreo (10-1000)
     DMODE E|PV                derivada sobre el error (ideal) o sobre la medición
     WD <ms>                   watchdog: SP = 0 si no llegan comandos (0 = apagado)
@@ -118,10 +131,10 @@ const float WHEEL_CIRC_M = 3.14159265f * WHEEL_DIAM_M;
 // ===========================================================================
 //  TIPOS (antes de cualquier función, por los prototipos que genera Arduino)
 // ===========================================================================
-enum Regimen : uint8_t { ACEL = 0, FREN = 1 };
-const char REG_CHAR[2] = {'A', 'F'};
+enum Juego : uint8_t { REF = 0, PERT = 1 };
+const char* JUEGO_NOMBRE[2] = {"REF", "PERT"};
 
-enum Forzado : uint8_t { REG_AUTO = 0, REG_SOLO_A = 1, REG_SOLO_F = 2 };
+enum Forzado : uint8_t { REG_AUTO = 0, REG_SOLO_REF = 1, REG_SOLO_PERT = 2 };
 
 enum Salida : uint8_t { OUT_ESP = 0, OUT_PLOT = 1, OUT_CSV = 2, OUT_OFF = 3 };
 const char* SALIDA_NOMBRE[4] = {"ESP", "PLOT", "CSV", "OFF"};
@@ -133,13 +146,23 @@ struct Ganancias {
   float N;    // [-]  0 = derivada sin filtro
 };
 
+// Ganancias de un juego en forma paralela: así se pueden interpolar término a
+// término (un juego con Ti = 0 queda simplemente con ki = 0).
+struct Paralela {
+  float kp;   // [PWM/rpm]
+  float ki;   // Kp/Ti  [PWM/(rpm·s)]
+  float kd;   // Kp·Td  [PWM·s/rpm]
+  float tf;   // Td/N   [s], constante del filtro de la derivada
+};
+
 struct Config {
   uint32_t  version;
-  Ganancias g[3][2];   // [motor][ACEL/FREN]
+  Ganancias g[3][2];   // [motor][REF/PERT]
   float     uMax;      // límite de |u| [PWM]
-  float     banda;     // histéresis del régimen [rpm]
+  float     banda;     // cambio de SP que activa REF y error que cuenta como "llegó" [rpm]
   uint16_t  tsMs;      // tiempo de muestreo [ms]
   uint16_t  wdMs;      // watchdog de comandos [ms], 0 = apagado
+  uint16_t  tMezMs;    // rampa de REF a PERT [ms], 0 = cambio directo
   uint8_t   dSobrePV;  // 0 = derivada sobre el error (ideal), 1 = sobre la medición
 };
 
@@ -154,10 +177,19 @@ struct Motor {
   bool    manual = false;         // true → lazo abierto con uManual
   float   uManual = 0.0f;
   bool    bumpless = false;       // pendiente: inicializar integral al volver a AUTO
-  Regimen reg = ACEL;
+
+  // Mezcla de los dos juegos
+  float   alfa = 0.0f;            // peso del juego REF: 1 = solo REF, 0 = solo PERT
+  float   spAncla = 0.0f;         // setpoint del último cambio de referencia detectado
+  bool    asentado = true;        // la velocidad ya llegó tras ese cambio
   Forzado forzado = REG_AUTO;
-  long    cuenta = 0;
-  long    cuentaPrev = 0;
+
+  // Medición de velocidad
+  long     cuenta = 0;
+  long     cuentaPrev = 0;
+  uint32_t tFlanco = 0;           // instante del último flanco del encoder [us]
+  uint32_t tFlancoPrev = 0;
+  bool     huboFlanco = false;    // la muestra anterior tuvo flancos (hay referencia de tiempo)
 };
 
 // ===========================================================================
@@ -167,10 +199,11 @@ struct Motor {
 // Kd=0) convertidas a forma ideal: Ti = Kp/Ki = 0.5 s, Td = Kd/Kp = 0.
 const Ganancias GANANCIAS_DEFECTO = {0.5f, 0.5f, 0.0f, 10.0f};
 const float     UMAX_DEFECTO      = 255.0f;
-const float     BANDA_DEFECTO     = 0.5f;   // rpm (~3.5 cuentas a 100 ms)
+const float     BANDA_DEFECTO     = 0.5f;   // rpm
 const uint16_t  TS_DEFECTO        = 100;    // ms, igual que izq.ino
+const uint16_t  TMEZ_DEFECTO      = 500;    // ms
 
-const uint32_t CFG_VERSION = 0x50494401;   // cambiar si se modifica struct Config
+const uint32_t CFG_VERSION = 0x50494402;   // cambiar si se modifica struct Config
 const char*    NVS_NS      = "pid_tuning";
 const char*    NVS_KEY     = "cfg";
 
@@ -182,7 +215,8 @@ Motor   mot[3];
 Salida  salida  = OUT_ESP;     // ESP por defecto: compatible con connect.py
 uint8_t verMask = 0b111;       // motores que se imprimen en PLOT / CSV
 
-unsigned long lastSampleTime = 0;
+uint32_t      tProgramadaUs  = 0;      // instante en que tocaba la última muestra
+uint32_t      tMuestraUs     = 0;      // instante en que se leyeron los encoders
 unsigned long lastCmdMs      = 0;
 bool          wdDisparado    = false;
 unsigned int  seq            = 0;
@@ -191,9 +225,12 @@ char   inBuf[128];
 size_t inLen      = 0;
 bool   inOverflow = false;
 
-// ---------- Encoder (cuadratura completa x4) — idéntico a izq.ino ----------
-volatile long    encoderCount[3] = {0, 0, 0};
-volatile uint8_t lastEncoded[3]  = {0, 0, 0};
+// ---------- Encoder (cuadratura completa x4) — misma lógica que izq.ino ----------
+// Además de la cuenta se guarda el instante del último flanco: con él la
+// velocidad se calcula sobre el tiempo real entre flancos (ver medirVelocidad).
+volatile long     encoderCount[3] = {0, 0, 0};
+volatile uint8_t  lastEncoded[3]  = {0, 0, 0};
+volatile uint32_t lastEdgeUs[3]   = {0, 0, 0};
 
 void IRAM_ATTR isrEncoder(void* arg) {
   int i = (int)(intptr_t)arg;
@@ -203,8 +240,8 @@ void IRAM_ATTR isrEncoder(void* arg) {
   uint8_t encoded = (MSB << 1) | LSB;
   uint8_t sum = (lastEncoded[i] << 2) | encoded;
 
-  if (sum == 0b1101 || sum == 0b0100 || sum == 0b0010 || sum == 0b1011) encoderCount[i]++;
-  if (sum == 0b1110 || sum == 0b0111 || sum == 0b0001 || sum == 0b1000) encoderCount[i]--;
+  if (sum == 0b1101 || sum == 0b0100 || sum == 0b0010 || sum == 0b1011) { encoderCount[i]++; lastEdgeUs[i] = micros(); }
+  if (sum == 0b1110 || sum == 0b0111 || sum == 0b0001 || sum == 0b1000) { encoderCount[i]--; lastEdgeUs[i] = micros(); }
 
   lastEncoded[i] = encoded;
 }
@@ -236,13 +273,14 @@ void setMotor(int idx, int pwm) {
 void cargarDefectos() {
   cfg.version = CFG_VERSION;
   for (int i = 0; i < 3; i++) {
-    cfg.g[i][ACEL] = GANANCIAS_DEFECTO;
-    cfg.g[i][FREN] = GANANCIAS_DEFECTO;
+    cfg.g[i][REF]  = GANANCIAS_DEFECTO;
+    cfg.g[i][PERT] = GANANCIAS_DEFECTO;
   }
   cfg.uMax     = UMAX_DEFECTO;
   cfg.banda    = BANDA_DEFECTO;
   cfg.tsMs     = TS_DEFECTO;
   cfg.wdMs     = 0;
+  cfg.tMezMs   = TMEZ_DEFECTO;
   cfg.dSobrePV = 0;
 }
 
@@ -271,30 +309,73 @@ void reiniciarEstado(Motor& m) {
 // ===========================================================================
 //  PID
 // ===========================================================================
-// ACEL si hay que aumentar |velocidad| en el sentido de giro, FREN si hay que
-// reducirla. Dentro de la banda se conserva el régimen anterior.
-Regimen elegirRegimen(const Motor& m) {
-  if (m.forzado == REG_SOLO_A) return ACEL;
-  if (m.forzado == REG_SOLO_F) return FREN;
-
-  float dir;
-  if (fabsf(m.pv) > cfg.banda)      dir = (m.pv > 0.0f) ? 1.0f : -1.0f;   // sentido de giro real
-  else if (fabsf(m.sp) > cfg.banda) dir = (m.sp > 0.0f) ? 1.0f : -1.0f;   // casi detenido: sentido pedido
-  else return m.reg;                                                       // detenido y SP ≈ 0
-
-  float eSentido = m.e * dir;   // > 0: aumentar |vel|   < 0: reducirla
-  if (eSentido >  cfg.banda) return ACEL;
-  if (eSentido < -cfg.banda) return FREN;
-  return m.reg;
-}
-
-void pasoControl(int i, float dt) {
-  Motor& m = mot[i];
-
-  // Velocidad en rpm del eje de salida
+// Velocidad en rpm del eje de salida. Las cuentas de la muestra se dividen
+// entre el tiempo real del primer al último flanco, no entre el periodo de
+// muestreo: contando pulsos, a TS = 10 ms la lectura saltaría de 1.4 en 1.4 rpm.
+float medirVelocidad(Motor& m, uint32_t dtMuestraUs) {
   long delta   = m.cuenta - m.cuentaPrev;
   m.cuentaPrev = m.cuenta;
-  m.pv = ((float)delta / dt) / PULSES_PER_OUTPUT_REV * 60.0f;
+  if (delta == 0) {
+    m.huboFlanco = false;
+    return 0.0f;
+  }
+  // Saliendo del reposo no hay flanco anterior de referencia: esa muestra se
+  // calcula con el periodo de muestreo.
+  uint32_t dtUs = m.huboFlanco ? (m.tFlanco - m.tFlancoPrev) : dtMuestraUs;
+  if (dtUs == 0) dtUs = dtMuestraUs;
+  m.tFlancoPrev = m.tFlanco;
+  m.huboFlanco  = true;
+  return ((float)delta * 60.0e6f) / ((float)dtUs * PULSES_PER_OUTPUT_REV);
+}
+
+// Peso del juego REF. Un cambio de setpoint lo lleva a 1; cuando la velocidad
+// llega (|e| <= BANDA) baja en rampa hasta 0 en TMEZ, y queda regulando PERT.
+void actualizarMezcla(Motor& m, float dt) {
+  if (m.forzado != REG_AUTO) {
+    m.alfa     = (m.forzado == REG_SOLO_REF) ? 1.0f : 0.0f;
+    m.spAncla  = m.sp;
+    m.asentado = true;
+    return;
+  }
+
+  if (fabsf(m.sp - m.spAncla) > cfg.banda) {   // cambió la referencia
+    m.spAncla  = m.sp;
+    m.alfa     = 1.0f;
+    m.asentado = false;
+  }
+  if (!m.asentado && fabsf(m.e) <= cfg.banda) m.asentado = true;
+
+  if (m.asentado && m.alfa > 0.0f) {
+    float baja = (cfg.tMezMs > 0) ? dt * 1000.0f / (float)cfg.tMezMs : 1.0f;
+    m.alfa = (m.alfa > baja) ? m.alfa - baja : 0.0f;
+  }
+}
+
+Paralela aParalela(const Ganancias& g) {
+  Paralela p;
+  p.kp = g.Kp;
+  p.ki = (g.Ti > 0.0f) ? g.Kp / g.Ti : 0.0f;
+  p.kd = g.Kp * g.Td;
+  p.tf = (g.N > 0.0f) ? g.Td / g.N : 0.0f;
+  return p;
+}
+
+// Ganancias que actúan en esta muestra: alfa·REF + (1 - alfa)·PERT
+Paralela mezclar(int i, float alfa) {
+  Paralela r = aParalela(cfg.g[i][REF]);
+  Paralela p = aParalela(cfg.g[i][PERT]);
+  Paralela k;
+  k.kp = p.kp + alfa * (r.kp - p.kp);
+  k.ki = p.ki + alfa * (r.ki - p.ki);
+  k.kd = p.kd + alfa * (r.kd - p.kd);
+  k.tf = p.tf + alfa * (r.tf - p.tf);
+  return k;
+}
+
+void pasoControl(int i, float dt, uint32_t dtMuestraUs) {
+  Motor& m = mot[i];
+
+  m.pv = medirVelocidad(m, dtMuestraUs);
   m.e  = m.sp - m.pv;
 
   if (!m.inicializado) {         // sin patada derivativa al arrancar / tras RESET
@@ -304,16 +385,15 @@ void pasoControl(int i, float dt) {
     m.inicializado = true;
   }
 
-  m.reg = elegirRegimen(m);
-  const Ganancias& g = cfg.g[i][m.reg];
+  actualizarMezcla(m, dt);
+  Paralela k = mezclar(i, m.alfa);
 
   // P
-  m.P = g.Kp * m.e;
+  m.P = k.kp * m.e;
 
   // D filtrada:  D_k = Tf/(Tf+dt)·D_k-1 + Kp·Td/(Tf+dt)·Δx,  Tf = Td/N
-  float Tf = (g.N > 0.0f) ? g.Td / g.N : 0.0f;
   float dx = cfg.dSobrePV ? -(m.pv - m.pvPrev) : (m.e - m.ePrev);
-  m.D = (Tf / (Tf + dt)) * m.D + (g.Kp * g.Td / (Tf + dt)) * dx;
+  m.D = (k.tf / (k.tf + dt)) * m.D + (k.kd / (k.tf + dt)) * dx;
   m.ePrev  = m.e;
   m.pvPrev = m.pv;
 
@@ -328,8 +408,8 @@ void pasoControl(int i, float dt) {
     }
 
     // I:  I_k = I_k-1 + (Kp/Ti)·e·dt, con anti-windup condicional
-    if (g.Ti > 0.0f) {
-      float dI = (g.Kp / g.Ti) * m.e * dt;
+    if (k.ki > 0.0f) {
+      float dI = k.ki * m.e * dt;
       float uPrueba = m.P + m.I + dI + m.D;
       bool  satura  = (uPrueba > cfg.uMax && dI > 0.0f) || (uPrueba < -cfg.uMax && dI < 0.0f);
       if (!satura) m.I += dI;
@@ -347,16 +427,25 @@ void pasoControl(int i, float dt) {
 // ===========================================================================
 //  SALIDA POR MUESTRA
 // ===========================================================================
-char codigoModo(const Motor& m) {
-  return m.manual ? 'M' : REG_CHAR[m.reg];
+// A 115200 baudios caben ~11 500 caracteres por segundo y una fila CSV son
+// unos 60: con TS corto no alcanza para imprimir todas las muestras de los 3
+// motores, así que se imprime una de cada n. El control corre en todas.
+uint32_t muestrasPorImpresion() {
+  if (salida != OUT_CSV && salida != OUT_PLOT) return 1;
+  uint32_t visibles = 0;
+  for (int i = 0; i < 3; i++) if (verMask & (1 << i)) visibles++;
+  uint32_t periodoMinMs = (visibles * 20 + 2) / 3;   // ~6.7 ms por motor visible
+  uint32_t n = (periodoMinMs + cfg.tsMs - 1) / cfg.tsMs;
+  return (n > 0) ? n : 1;
 }
 
 void imprimirMuestra(unsigned long t) {
+  if (seq++ % muestrasPorImpresion() != 0) return;
   switch (salida) {
     case OUT_ESP: {
       // Trama de izq.ino para connect.py: ESP_ID,seq,rpm0,v0,rpm1,v1,rpm2,v2
       Serial.print(ESP_ID); Serial.print(",");
-      Serial.print(seq);
+      Serial.print(seq - 1);
       for (int i = 0; i < 3; i++) {
         float v_mps = (mot[i].pv / 60.0f) * WHEEL_CIRC_M;
         Serial.print(",");
@@ -380,18 +469,21 @@ void imprimirMuestra(unsigned long t) {
       break;
     }
     case OUT_CSV: {
+      // reg: "M" en manual, o el porcentaje del juego REF en la mezcla (0-100)
       for (int i = 0; i < 3; i++) {
         if (!(verMask & (1 << i))) continue;
         const Motor& m = mot[i];
-        Serial.printf("%lu,%d,%c,%.3f,%.3f,%.3f,%.2f,%.2f,%.2f,%.1f\n",
-                      t, i, codigoModo(m), m.sp, m.pv, m.e, m.P, m.I, m.D, m.u);
+        char reg[5];
+        if (m.manual) strcpy(reg, "M");
+        else          snprintf(reg, sizeof(reg), "%d", (int)lroundf(m.alfa * 100.0f));
+        Serial.printf("%lu,%d,%s,%.3f,%.3f,%.3f,%.1f,%.1f,%.1f,%.1f\n",
+                      t, i, reg, m.sp, m.pv, m.e, m.P, m.I, m.D, m.u);
       }
       break;
     }
     case OUT_OFF:
       break;
   }
-  seq++;
 }
 
 // ===========================================================================
@@ -403,7 +495,7 @@ void imprimirGanancias(uint8_t motores, uint8_t juegos) {
     for (int r = 0; r < 2; r++) {
       if (!(juegos & (1 << r))) continue;
       const Ganancias& g = cfg.g[i][r];
-      Serial.printf("# PID %c %d %.4f %.4f %.4f %.1f\n", REG_CHAR[r], i, g.Kp, g.Ti, g.Td, g.N);
+      Serial.printf("# PID %s %d %.4f %.4f %.4f %.1f\n", JUEGO_NOMBRE[r], i, g.Kp, g.Ti, g.Td, g.N);
     }
   }
 }
@@ -416,10 +508,11 @@ void imprimirVer() {
 void imprimirConfig() {
   msg("===== Configuración — lado %s (%s) =====", LADO, ESP_ID);
   msg("origen: %s", cfgDesdeNVS ? "memoria no volátil (GUARDAR)" : "valores por defecto");
-  msg("      J m     Kp      Ti[s]   Td[s]   N");
+  msg("      J    m   Kp      Ti[s]   Td[s]   N");
   imprimirGanancias(0b111, 0b11);
   msg("UMAX %.0f", cfg.uMax);
   msg("BANDA %.2f", cfg.banda);
+  msg("TMEZ %u", cfg.tMezMs);
   msg("TS %u", cfg.tsMs);
   msg("DMODE %s", cfg.dSobrePV ? "PV" : "E");
   msg("WD %u", cfg.wdMs);
@@ -430,25 +523,26 @@ void imprimirConfig() {
 void imprimirEstado() {
   for (int i = 0; i < 3; i++) {
     const Motor& m = mot[i];
-    const char* forz = (m.forzado == REG_AUTO) ? "auto" : "forzado";
-    msg("m%d %s reg=%c(%s) SP=%.2f PV=%.2f e=%.2f P=%.1f I=%.1f D=%.1f u=%.0f enc=%ld",
-        i, m.manual ? "MAN " : "AUTO", REG_CHAR[m.reg], forz,
+    const char* forz = (m.forzado == REG_AUTO) ? "auto" : "fijo";
+    msg("m%d %s REF=%.0f%%(%s) SP=%.2f PV=%.2f e=%.2f P=%.1f I=%.1f D=%.1f u=%.0f enc=%ld",
+        i, m.manual ? "MAN " : "AUTO", m.alfa * 100.0f, forz,
         m.sp, m.pv, m.e, m.P, m.I, m.D, m.u, m.cuenta);
   }
   if (cfg.wdMs > 0) msg("watchdog %u ms%s", cfg.wdMs, wdDisparado ? " (DISPARADO: SP = 0)" : "");
 }
 
 void imprimirAyuda() {
-  msg("---------- Comandos (m = 0,1,2,*   J = A,F,*) ----------");
+  msg("---------- Comandos (m = 0,1,2,*   J = REF,PERT,*) ----------");
   msg("S<rpm>                   setpoint a los 3 motores (connect.py), ej. S10");
   msg("SP m <rpm>               setpoint a un motor, ej. SP 0 8");
-  msg("PID J m Kp Ti Td [N]     ganancias ideales, ej. PID A * 0.8 0.4 0.02 10");
-  msg("KP|TI|TD|N J m <valor>   un parámetro, ej. TI F 1 0.3");
-  msg("REG AUTO|A|F m           régimen automático o forzar juego A / F");
+  msg("PID J m Kp Ti Td [N]     ganancias ideales, ej. PID REF * 6 0.03 0 10");
+  msg("KP|TI|TD|N J m <valor>   un parámetro, ej. TI PERT 1 0.03");
+  msg("REG AUTO|REF|PERT m      mezcla automática o dejar fijo un juego");
   msg("MAN m <pwm>              lazo abierto, PWM fijo -255..255");
   msg("AUTO m                   regresar al PID sin salto");
   msg("UMAX <0-255>             límite de |PWM|");
-  msg("BANDA <rpm>              histéresis del cambio de régimen");
+  msg("BANDA <rpm>              cambio de SP que activa REF y error que cuenta como llegada");
+  msg("TMEZ <ms>                rampa de REF a PERT al llegar (0 = directo)");
   msg("TS <ms>                  tiempo de muestreo, 10-1000");
   msg("DMODE E|PV               derivada sobre error o sobre medición");
   msg("WD <ms>                  watchdog de comandos (0 = apagado)");
@@ -480,12 +574,11 @@ uint8_t parseMotores(const char* s) {
   return 0;
 }
 
-// Máscara de juegos: "A" (bit 0), "F" (bit 1) o "*"; 0 si es inválido
+// Máscara de juegos: "REF" (bit 0), "PERT" (bit 1) o "*"; 0 si es inválido
 uint8_t parseJuegos(const char* s) {
-  if (s[1] != '\0') return 0;
-  if (s[0] == 'A') return 0b01;
-  if (s[0] == 'F') return 0b10;
-  if (s[0] == '*') return 0b11;
+  if (es(s, "REF"))  return 0b01;
+  if (es(s, "PERT")) return 0b10;
+  if (es(s, "*"))    return 0b11;
   return 0;
 }
 
@@ -497,7 +590,7 @@ void cmdPID(char** tok, int n) {
          && (js = parseJuegos(tok[1])) && (ms = parseMotores(tok[2]))
          && aNumero(tok[3], kp) && aNumero(tok[4], ti) && aNumero(tok[5], td)
          && (n == 6 || aNumero(tok[6], nf));
-  if (!ok) { msg("Uso: PID <A|F|*> <0|1|2|*> <Kp> <Ti> <Td> [N]"); return; }
+  if (!ok) { msg("Uso: PID <REF|PERT|*> <0|1|2|*> <Kp> <Ti> <Td> [N]"); return; }
   if (kp < 0 || ti < 0 || td < 0 || nf < 0) { msg("Kp, Ti, Td y N deben ser >= 0"); return; }
 
   for (int i = 0; i < 3; i++) {
@@ -517,7 +610,7 @@ void cmdParametro(const char* nombre, char** tok, int n) {
   uint8_t js = 0, ms = 0;
   float v;
   bool ok = (n == 4) && (js = parseJuegos(tok[1])) && (ms = parseMotores(tok[2])) && aNumero(tok[3], v);
-  if (!ok) { msg("Uso: %s <A|F|*> <0|1|2|*> <valor>", nombre); return; }
+  if (!ok) { msg("Uso: %s <REF|PERT|*> <0|1|2|*> <valor>", nombre); return; }
   if (v < 0) { msg("%s debe ser >= 0", nombre); return; }
 
   for (int i = 0; i < 3; i++) {
@@ -592,10 +685,10 @@ void procesarLinea(char* linea) {
   else if (es(c, "REG")) {
     Forzado f;
     if      (n == 3 && es(tok[1], "AUTO")) f = REG_AUTO;
-    else if (n == 3 && es(tok[1], "A"))    f = REG_SOLO_A;
-    else if (n == 3 && es(tok[1], "F"))    f = REG_SOLO_F;
-    else { msg("Uso: REG <AUTO|A|F> <0|1|2|*>"); return; }
-    if (!(ms = parseMotores(tok[2]))) { msg("Uso: REG <AUTO|A|F> <0|1|2|*>"); return; }
+    else if (n == 3 && es(tok[1], "REF"))  f = REG_SOLO_REF;
+    else if (n == 3 && es(tok[1], "PERT")) f = REG_SOLO_PERT;
+    else { msg("Uso: REG <AUTO|REF|PERT> <0|1|2|*>"); return; }
+    if (!(ms = parseMotores(tok[2]))) { msg("Uso: REG <AUTO|REF|PERT> <0|1|2|*>"); return; }
     for (int i = 0; i < 3; i++) if (ms & (1 << i)) mot[i].forzado = f;
     msg("REG %s %s", tok[1], tok[2]);
   }
@@ -628,6 +721,11 @@ void procesarLinea(char* linea) {
     if (n != 2 || !aNumero(tok[1], v) || v < 0) { msg("Uso: BANDA <rpm >= 0>"); return; }
     cfg.banda = v;
     msg("BANDA %.2f", v);
+  }
+  else if (es(c, "TMEZ")) {
+    if (n != 2 || !aNumero(tok[1], v) || v < 0 || v > 60000) { msg("Uso: TMEZ <0-60000 ms>"); return; }
+    cfg.tMezMs = (uint16_t)v;
+    msg("TMEZ %u", cfg.tMezMs);
   }
   else if (es(c, "TS")) {
     if (n != 2 || !aNumero(tok[1], v) || v < 10 || v > 1000) { msg("Uso: TS <10-1000 ms>"); return; }
@@ -734,7 +832,7 @@ void revisarWatchdog() {
 //  SETUP / LOOP
 // ===========================================================================
 void setup() {
-  Serial.setTxBufferSize(1024);   // los reportes largos no bloquean el lazo
+  Serial.setTxBufferSize(2048);   // los reportes largos no bloquean el lazo
   Serial.begin(115200);
   delay(300);
 
@@ -760,8 +858,9 @@ void setup() {
   cargarDefectos();
   cfgDesdeNVS = cargarNVS();
 
-  lastCmdMs      = millis();
-  lastSampleTime = millis();
+  lastCmdMs     = millis();
+  tProgramadaUs = micros();
+  tMuestraUs    = tProgramadaUs;
 
   msg("Sintonización PID — lado %s (%s). Escribe AYUDA para ver los comandos.", LADO, ESP_ID);
   imprimirConfig();
@@ -771,22 +870,34 @@ void loop() {
   leerSerial();
   revisarWatchdog();
 
-  unsigned long now = millis();
-  if (now - lastSampleTime >= cfg.tsMs) {
-    float dt = (now - lastSampleTime) / 1000.0f;
-    lastSampleTime = now;
+  uint32_t tsUs = (uint32_t)cfg.tsMs * 1000UL;
+  uint32_t ahora = micros();
+  if ((uint32_t)(ahora - tProgramadaUs) < tsUs) return;
 
-    long count[3];
-    noInterrupts();
-    count[0] = encoderCount[0];
-    count[1] = encoderCount[1];
-    count[2] = encoderCount[2];
-    interrupts();
+  // Periodo fijo, sin deriva. Si el lazo se atrasó más de una muestra (un
+  // reporte largo, GUARDAR) se reanuda desde ahora en vez de recuperarlas.
+  tProgramadaUs += tsUs;
+  if ((uint32_t)(ahora - tProgramadaUs) >= tsUs) tProgramadaUs = ahora;
 
-    for (int i = 0; i < 3; i++) {
-      mot[i].cuenta = count[i];
-      pasoControl(i, dt);
-    }
-    imprimirMuestra(now);
+  long     count[3];
+  uint32_t tFlanco[3];
+  noInterrupts();
+  uint32_t t = micros();
+  for (int i = 0; i < 3; i++) {
+    count[i]   = encoderCount[i];
+    tFlanco[i] = lastEdgeUs[i];
   }
+  interrupts();
+
+  uint32_t dtUs = t - tMuestraUs;   // tiempo real desde la muestra anterior
+  tMuestraUs = t;
+  if (dtUs == 0) return;
+  float dt = dtUs * 1.0e-6f;
+
+  for (int i = 0; i < 3; i++) {
+    mot[i].cuenta  = count[i];
+    mot[i].tFlanco = tFlanco[i];
+    pasoControl(i, dt, dtUs);
+  }
+  imprimirMuestra(millis());
 }

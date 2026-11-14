@@ -1,18 +1,24 @@
 {
-  "_comentario": "PID en forma ideal u = Kp*[e + (1/Ti)*integral(e) + Td*de/dt], filtro Td/N. Ti = 0 sin integral, Td = 0 sin derivada, N = 0 sin filtro. A = aceleracion, F = frenado. L = izquierdo (ESP_L), R = derecho (ESP_R). TS en ms, BANDA en rpm, UMAX en PWM.",
-  "config": {"UMAX": 255.0, "TS": 100, "BANDA": 0.5, "DMODE": "E"},
+  "_comentario": "modelo: G(s) = K*exp(-theta*s)/(tau*s + 1), K en rpm/PWM, tau y theta en s; K = 0 es motor sin identificar. PID en forma ideal u = Kp*[e + (1/Ti)*integral(e) + Td*de/dt], filtro Td/N. Ti = 0 sin integral, Td = 0 sin derivada, N = 0 sin filtro. REF = juego para cambios de referencia (ITAE), PERT = juego contra perturbaciones (IAE); el firmware los mezcla. L = izquierdo (ESP_L), R = derecho (ESP_R). TS y TMEZ en ms, BANDA en rpm, UMAX en PWM.",
+  "config": {"UMAX": 255.0, "TS": 100, "BANDA": 0.5, "TMEZ": 500, "DMODE": "E"},
   "motores": {
-    "L0": {"A": {"Kp": 0.5, "Ti": 0.5, "Td": 0.0, "N": 10.0},
-           "F": {"Kp": 0.5, "Ti": 0.5, "Td": 0.0, "N": 10.0}},
-    "L1": {"A": {"Kp": 0.5, "Ti": 0.5, "Td": 0.0, "N": 10.0},
-           "F": {"Kp": 0.5, "Ti": 0.5, "Td": 0.0, "N": 10.0}},
-    "L2": {"A": {"Kp": 0.5, "Ti": 0.5, "Td": 0.0, "N": 10.0},
-           "F": {"Kp": 0.5, "Ti": 0.5, "Td": 0.0, "N": 10.0}},
-    "R0": {"A": {"Kp": 0.5, "Ti": 0.5, "Td": 0.0, "N": 10.0},
-           "F": {"Kp": 0.5, "Ti": 0.5, "Td": 0.0, "N": 10.0}},
-    "R1": {"A": {"Kp": 0.5, "Ti": 0.5, "Td": 0.0, "N": 10.0},
-           "F": {"Kp": 0.5, "Ti": 0.5, "Td": 0.0, "N": 10.0}},
-    "R2": {"A": {"Kp": 0.5, "Ti": 0.5, "Td": 0.0, "N": 10.0},
-           "F": {"Kp": 0.5, "Ti": 0.5, "Td": 0.0, "N": 10.0}}
+    "L0": {"modelo": {"K": 0.0, "tau": 0.0, "theta": 0.0},
+           "REF":    {"Kp": 0.5, "Ti": 0.5, "Td": 0.0, "N": 10.0},
+           "PERT":   {"Kp": 0.5, "Ti": 0.5, "Td": 0.0, "N": 10.0}},
+    "L1": {"modelo": {"K": 0.0, "tau": 0.0, "theta": 0.0},
+           "REF":    {"Kp": 0.5, "Ti": 0.5, "Td": 0.0, "N": 10.0},
+           "PERT":   {"Kp": 0.5, "Ti": 0.5, "Td": 0.0, "N": 10.0}},
+    "L2": {"modelo": {"K": 0.0, "tau": 0.0, "theta": 0.0},
+           "REF":    {"Kp": 0.5, "Ti": 0.5, "Td": 0.0, "N": 10.0},
+           "PERT":   {"Kp": 0.5, "Ti": 0.5, "Td": 0.0, "N": 10.0}},
+    "R0": {"modelo": {"K": 0.0, "tau": 0.0, "theta": 0.0},
+           "REF":    {"Kp": 0.5, "Ti": 0.5, "Td": 0.0, "N": 10.0},
+           "PERT":   {"Kp": 0.5, "Ti": 0.5, "Td": 0.0, "N": 10.0}},
+    "R1": {"modelo": {"K": 0.0, "tau": 0.0, "theta": 0.0},
+           "REF":    {"Kp": 0.5, "Ti": 0.5, "Td": 0.0, "N": 10.0},
+           "PERT":   {"Kp": 0.5, "Ti": 0.5, "Td": 0.0, "N": 10.0}},
+    "R2": {"modelo": {"K": 0.0, "tau": 0.0, "theta": 0.0},
+           "REF":    {"Kp": 0.5, "Ti": 0.5, "Td": 0.0, "N": 10.0},
+           "PERT":   {"Kp": 0.5, "Ti": 0.5, "Td": 0.0, "N": 10.0}}
   }
 }

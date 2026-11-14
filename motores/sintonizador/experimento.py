@@ -9,7 +9,8 @@ Un experimento es un perfil fijo que el usuario lanza a mano:
   - tipo "PWM": lazo abierto (comando MAN del firmware), para identificar cada motor.
     La subida da la respuesta de aceleración y la bajada la de frenado.
   - tipo "SP":  lazo cerrado (setpoint), para revisar la sintonía con las ganancias
-    cargadas. La subida usa el juego A y la bajada el juego F.
+    cargadas. En cada cambio de setpoint actúa el juego REF y, cuando la velocidad
+    llega, la mezcla pasa al juego PERT (columna "reg" = porcentaje de REF).
 
 Cada experimento se guarda en registros/ como:
   - <fecha>_<tipo>_<motores>.csv  : una fila por muestra y motor (los 6 motores)
@@ -27,7 +28,7 @@ from pathlib import Path
 
 from enlace import LADOS, MOTORES, Muestra, fmt_num
 
-MAX_MUESTRAS   = 3000   # por motor en memoria (5 min a 100 ms)
+MAX_MUESTRAS   = 3000   # por motor en memoria (1 min con una muestra cada 20 ms)
 DURACION_MAX_S = 60.0   # tope de un experimento, por si hay un error de dedo
 DATOS_VIEJOS_S = 1.0    # sin datos de un lado por más de esto → abortar
 

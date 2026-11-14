@@ -12,11 +12,16 @@ Uso (desde motores/sintonizador/):
 
 Qué hace:
   - Al conectar, carga a los dos ESP32 las ganancias de ganancias.json.
+  - Guarda el modelo de cada motor (K, τ, θ de la prueba de escalón en lazo
+    abierto) y, cuando ustedes lo piden, calcula con él los dos juegos de
+    ganancias: Referencia (ITAE) y Perturbación (IAE). Ver sintonia.py.
+    El firmware mezcla los dos juegos en tiempo real.
   - Muestra en vivo SP, PV y PWM de los 6 motores.
   - Corre los experimentos que ustedes lanzan (escalón de PWM en lazo abierto
     o de setpoint en lazo cerrado) en un motor, un lado o los 6 a la vez, y
     guarda cada uno en registros/ (CSV + JSON con las ganancias usadas).
-  - No calcula ni ajusta ganancias por su cuenta.
+  - Nunca cambia ganancias por su cuenta: las calculadas quedan en la tabla
+    hasta que ustedes pulsan "Enviar a los ESP".
 
 Seguridad:
   - PARO (botón o tecla Esc) manda STOP a los dos lados.
@@ -40,14 +45,18 @@ from tkinter import messagebox, ttk
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
 from matplotlib.figure import Figure
 
-from enlace import (CAMPOS, JUEGOS, LADOS, MOTORES, NOMBRE_LADO, WD_MS, EnlaceESP,
+import sintonia
+from enlace import (CAMPOS, JUEGOS, LADOS, MOTORES, NOMBRE_JUEGO, NOMBRE_LADO, WD_MS, EnlaceESP,
                     abrir_puerto, buscar_esps)
 from experimento import DATOS_VIEJOS_S, Datos, Ejecutor, Experimento
 
 AQUI = Path(__file__).resolve().parent
 
 GANANCIA_DEFECTO = {"Kp": 0.5, "Ti": 0.5, "Td": 0.0, "N": 10.0}   # = der.ino / izq.ino
-CONFIG_DEFECTO   = {"UMAX": 255, "TS": 100, "BANDA": 0.5, "DMODE": "E"}
+CAMPOS_MODELO    = ("K", "tau", "theta")
+MODELO_DEFECTO   = {"K": 0.0, "tau": 0.0, "theta": 0.0}           # K = 0: motor sin identificar
+CONFIG_DEFECTO   = {"UMAX": 255, "TS": 100, "BANDA": 0.5, "TMEZ": 500, "DMODE": "E"}
+LIMITES_CFG      = {"UMAX": (0, 255), "TS": (10, 1000), "BANDA": (0, 1e9), "TMEZ": (0, 60000)}
 
 VENTANA_S   = 20      # segundos visibles en las gráficas
 POLL_MS     = 50      # cola de eventos
@@ -66,35 +75,47 @@ def ganancias_defecto():
     return {m: {j: dict(GANANCIA_DEFECTO) for j in JUEGOS} for m in MOTORES}
 
 
+def modelos_defecto():
+    return {m: dict(MODELO_DEFECTO) for m in MOTORES}
+
+
 def cargar_ganancias(ruta: Path):
-    """Regresa (ganancias, config). Crea el archivo con valores por defecto si no existe."""
+    """Regresa (ganancias, modelos, config). Crea el archivo con valores por defecto
+    si no existe. Lo que falte en el archivo (por ejemplo, uno anterior sin
+    modelos ni juegos REF/PERT) se queda con su valor por defecto."""
     if not ruta.exists():
-        guardar_ganancias(ruta, ganancias_defecto(), dict(CONFIG_DEFECTO))
+        guardar_ganancias(ruta, ganancias_defecto(), modelos_defecto(), dict(CONFIG_DEFECTO))
     data = json.loads(ruta.read_text(encoding="utf-8"))
-    cfg = {**CONFIG_DEFECTO, **data.get("config", {})}
-    g = ganancias_defecto()
+    cfg = {**CONFIG_DEFECTO, **{k: v for k, v in data.get("config", {}).items() if k in CONFIG_DEFECTO}}
+    g, modelos = ganancias_defecto(), modelos_defecto()
     for m in MOTORES:
+        dm = data.get("motores", {}).get(m, {})
+        modelos[m].update({c: float(v) for c, v in dm.get("modelo", {}).items() if c in CAMPOS_MODELO})
         for j in JUEGOS:
-            g[m][j].update({c: float(v) for c, v in data["motores"][m][j].items() if c in CAMPOS})
-    return g, cfg
+            g[m][j].update({c: float(v) for c, v in dm.get(j, {}).items() if c in CAMPOS})
+    return g, modelos, cfg
 
 
-def guardar_ganancias(ruta: Path, g: dict, cfg: dict):
+def guardar_ganancias(ruta: Path, g: dict, modelos: dict, cfg: dict):
     """JSON legible: una línea por motor y juego, para editarlo a mano o verlo en git diff."""
     def obj(d):
         return "{" + ", ".join(f'"{k}": {json.dumps(v)}' for k, v in d.items()) + "}"
     lineas = [
         "{",
-        '  "_comentario": "PID en forma ideal u = Kp*[e + (1/Ti)*integral(e) + Td*de/dt], filtro Td/N. '
-        'Ti = 0 sin integral, Td = 0 sin derivada, N = 0 sin filtro. A = aceleracion, F = frenado. '
-        'L = izquierdo (ESP_L), R = derecho (ESP_R). TS en ms, BANDA en rpm, UMAX en PWM.",',
+        '  "_comentario": "modelo: G(s) = K*exp(-theta*s)/(tau*s + 1), K en rpm/PWM, tau y theta en s; '
+        'K = 0 es motor sin identificar. PID en forma ideal u = Kp*[e + (1/Ti)*integral(e) + Td*de/dt], '
+        'filtro Td/N. Ti = 0 sin integral, Td = 0 sin derivada, N = 0 sin filtro. '
+        'REF = juego para cambios de referencia (ITAE), PERT = juego contra perturbaciones (IAE); '
+        'el firmware los mezcla. L = izquierdo (ESP_L), R = derecho (ESP_R). '
+        'TS y TMEZ en ms, BANDA en rpm, UMAX en PWM.",',
         f'  "config": {obj(cfg)},',
         '  "motores": {',
     ]
     for k, m in enumerate(MOTORES):
         fin = "," if k < len(MOTORES) - 1 else ""
-        lineas.append(f'    "{m}": {{"A": {obj(g[m]["A"])},')
-        lineas.append(f'           "F": {obj(g[m]["F"])}}}{fin}')
+        lineas.append(f'    "{m}": {{"modelo": {obj(modelos[m])},')
+        lineas.append(f'           "REF":    {obj(g[m]["REF"])},')
+        lineas.append(f'           "PERT":   {obj(g[m]["PERT"])}}}{fin}')
     lineas += ["  }", "}", ""]
     ruta.write_text("\n".join(lineas), encoding="utf-8")
 
@@ -125,16 +146,18 @@ class App:
         self.g_enviadas  = None   # ganancias que tienen los ESP (para el registro)
         self.verif       = None   # (ganancias, t_envio) pendiente de confirmar
 
+        self.calculando  = False  # hay un cálculo de ganancias corriendo en otro hilo
+
         self.valores_tipo = {"PWM": {"v0": "0", "v1": "120"}, "SP": {"v0": "0", "v1": "10"}}
 
         self._construir()
         try:
-            g, cfg = cargar_ganancias(self.ruta_g)
+            g, modelos, cfg = cargar_ganancias(self.ruta_g)
         except Exception as e:
             messagebox.showerror("Ganancias", f"No se pudo leer {self.ruta_g.name}:\n{e}\nSe usan valores por defecto.")
-            g, cfg = ganancias_defecto(), dict(CONFIG_DEFECTO)
-        self._poner_tabla(g, cfg)
-        self.log(f"Ganancias de {self.ruta_g}")
+            g, modelos, cfg = ganancias_defecto(), modelos_defecto(), dict(CONFIG_DEFECTO)
+        self._poner_tabla(g, modelos, cfg)
+        self.log(f"Modelos y ganancias de {self.ruta_g}")
 
         root.protocol("WM_DELETE_WINDOW", self.cerrar)
         root.bind_all("<Escape>", lambda _e: self.paro())
@@ -218,42 +241,58 @@ class App:
         self.canvas.get_tk_widget().pack(side="top", fill="both", expand=True)
 
     def _construir_ganancias(self, padre):
-        lf = ttk.LabelFrame(padre, text="Ganancias PID (forma ideal)   u = Kp·[ e + (1/Ti)∫e dt + Td·de/dt ]", padding=6)
+        lf = ttk.LabelFrame(padre, text="Modelo y ganancias PID de cada motor   "
+                                        "u = Kp·[ e + (1/Ti)∫e dt + Td·de/dt ]", padding=6)
         lf.pack(side="top", fill="x")
 
+        # Una fila por motor, de izquierda a derecha: modelo → juego REF → juego PERT → en vivo
         tabla = ttk.Frame(lf)
         tabla.pack(side="top", fill="x")
-        ttk.Label(tabla, text="Aceleración (A)", font=("Segoe UI", 9, "bold")).grid(row=0, column=1, columnspan=4)
-        ttk.Label(tabla, text="Frenado (F)", font=("Segoe UI", 9, "bold")).grid(row=0, column=6, columnspan=4)
-        ttk.Label(tabla, text="En vivo", font=("Segoe UI", 9, "bold")).grid(row=0, column=11, columnspan=4)
-        encabezados = ["Motor", "Kp", "Ti [s]", "Td [s]", "N", "", "Kp", "Ti [s]", "Td [s]", "N", "",
-                       "Reg", "SP", "PV", "u"]
+        negrita = ("Segoe UI", 9, "bold")
+        COL_MODELO, COL_JUEGO, COL_VIVO = 1, {"REF": 5, "PERT": 10}, 15
+        ttk.Label(tabla, text="Modelo de la planta", font=negrita).grid(row=0, column=COL_MODELO, columnspan=3)
+        ttk.Label(tabla, text="Referencia · ITAE", font=negrita).grid(row=0, column=COL_JUEGO["REF"], columnspan=4)
+        ttk.Label(tabla, text="Perturbación · IAE", font=negrita).grid(row=0, column=COL_JUEGO["PERT"], columnspan=4)
+        ttk.Label(tabla, text="En vivo", font=negrita).grid(row=0, column=COL_VIVO, columnspan=4)
+        encabezados = ["Motor", "K", "τ [s]", "θ [s]", "", "Kp", "Ti [s]", "Td [s]", "N", "",
+                       "Kp", "Ti [s]", "Td [s]", "N", "", "% Ref", "SP", "PV", "u"]
         for c, txt in enumerate(encabezados):
             ttk.Label(tabla, text=txt, foreground=GRIS).grid(row=1, column=c, padx=2)
-        ttk.Separator(tabla, orient="vertical").grid(row=0, column=5, rowspan=8, sticky="ns", padx=4)
-        ttk.Separator(tabla, orient="vertical").grid(row=0, column=10, rowspan=8, sticky="ns", padx=4)
+        for c in (4, 9, 14):
+            ttk.Separator(tabla, orient="vertical").grid(row=0, column=c, rowspan=8, sticky="ns", padx=4)
 
-        self.ent = {}
+        self.ent = {}       # (motor, juego, campo) → (Entry, StringVar)
+        self.ent_mod = {}   # (motor, campo del modelo) → (Entry, StringVar)
         self.lbl_vivo = {}
         for fila, m in enumerate(MOTORES, start=2):
-            tk.Label(tabla, text=m, fg=COLORES[int(m[1])], font=("Segoe UI", 9, "bold")).grid(row=fila, column=0)
-            for jj, juego in enumerate(JUEGOS):
+            tk.Label(tabla, text=m, fg=COLORES[int(m[1])], font=negrita).grid(row=fila, column=0)
+            for cc, campo in enumerate(CAMPOS_MODELO):
+                var = tk.StringVar()
+                e = tk.Entry(tabla, textvariable=var, width=7, justify="right", relief="solid", bd=1)
+                e.grid(row=fila, column=COL_MODELO + cc, padx=1, pady=1)
+                self.ent_mod[(m, campo)] = (e, var)
+                var.trace_add("write", lambda *_a, k=(m, campo): self._colorear_modelo(k))
+            for juego in JUEGOS:
                 for cc, campo in enumerate(CAMPOS):
                     var = tk.StringVar()
-                    e = tk.Entry(tabla, textvariable=var, width=7, justify="right", relief="solid", bd=1)
-                    e.grid(row=fila, column=1 + jj * 5 + cc, padx=1, pady=1)
+                    e = tk.Entry(tabla, textvariable=var, width=6, justify="right", relief="solid", bd=1)
+                    e.grid(row=fila, column=COL_JUEGO[juego] + cc, padx=1, pady=1)
                     clave = (m, juego, campo)
                     self.ent[clave] = (e, var)
                     var.trace_add("write", lambda *_a, k=clave: self._colorear(k))
             for cc, campo in enumerate(("reg", "sp", "pv", "u")):
                 lbl = ttk.Label(tabla, text="—", width=6, anchor="e", font=("Consolas", 9))
-                lbl.grid(row=fila, column=11 + cc, padx=1)
+                lbl.grid(row=fila, column=COL_VIVO + cc, padx=1)
                 self.lbl_vivo[(m, campo)] = lbl
+        ttk.Label(lf, foreground=GRIS, wraplength=760, justify="left",
+                  text="Modelo: G(s) = K·e^(−θs) / (τs + 1) de la prueba de escalón, con K en rpm/PWM. "
+                       "K = 0: motor sin identificar.").pack(side="top", anchor="w", pady=(2, 0))
 
         cfg_f = ttk.Frame(lf)
         cfg_f.pack(side="top", fill="x", pady=(6, 0))
         self.ent_cfg = {}
-        for nombre, etiqueta in (("UMAX", "UMAX [PWM]"), ("TS", "TS [ms]"), ("BANDA", "BANDA [rpm]")):
+        for nombre, etiqueta in (("UMAX", "UMAX [PWM]"), ("TS", "TS [ms]"), ("BANDA", "BANDA [rpm]"),
+                                 ("TMEZ", "Mezcla [ms]")):
             ttk.Label(cfg_f, text=etiqueta).pack(side="left")
             var = tk.StringVar()
             e = tk.Entry(cfg_f, textvariable=var, width=6, justify="right", relief="solid", bd=1)
@@ -264,7 +303,24 @@ class App:
         self.var_dmode = tk.StringVar(value="E")
         cb = ttk.Combobox(cfg_f, textvariable=self.var_dmode, values=("E", "PV"), width=4, state="readonly")
         cb.pack(side="left", padx=2)
-        ttk.Label(cfg_f, text="(E = error, PV = medición)", foreground=GRIS).pack(side="left")
+
+        # ---- Cálculo de ganancias desde el modelo (usa TS y la derivada de arriba) ----
+        calc = ttk.Frame(lf)
+        calc.pack(side="top", fill="x", pady=(8, 0))
+        self.btn_calcular = ttk.Button(calc, text="Calcular ganancias con el modelo", command=self.calcular_ganancias)
+        self.btn_calcular.pack(side="left")
+        ttk.Label(calc, text="Estructura").pack(side="left", padx=(10, 2))
+        self.var_estructura = tk.StringVar(value="PI")
+        ttk.Combobox(calc, textvariable=self.var_estructura, values=sintonia.ESTRUCTURAS,
+                     width=4, state="readonly").pack(side="left")
+        ttk.Label(calc, text="Margen de ganancia ≥").pack(side="left", padx=(10, 2))
+        self.var_margen = tk.StringVar(value=f"{sintonia.MARGEN_DEFECTO:g}")
+        ttk.Entry(calc, textvariable=self.var_margen, width=5, justify="right").pack(side="left")
+        ttk.Label(calc, text="(1 = óptimo sin restricción)", foreground=GRIS).pack(side="left", padx=4)
+        self.lbl_calc = ttk.Label(lf, foreground=GRIS, wraplength=760, justify="left",
+                                  text="Llena la tabla con los dos juegos de cada motor que tenga modelo, para el TS de arriba. "
+                                       "No envía nada a los ESP.")
+        self.lbl_calc.pack(side="top", anchor="w", pady=(2, 0))
 
         botones = ttk.Frame(lf)
         botones.pack(side="top", fill="x", pady=(8, 0))
@@ -274,7 +330,12 @@ class App:
         ttk.Button(botones, text="Guardar en memoria de los ESP…", command=self.guardar_en_esp).pack(side="left", padx=4)
         self.lbl_g = ttk.Label(lf, text="", foreground=GRIS)
         self.lbl_g.pack(side="top", anchor="w", pady=(4, 0))
-        ttk.Label(lf, foreground=GRIS, text="Blanco = confirmado por el ESP · amarillo = sin enviar · rojo = inválido o no coincide").pack(side="top", anchor="w")
+        ttk.Label(lf, foreground=GRIS, wraplength=760, justify="left",
+                  text="Ganancias: blanco = confirmado por el ESP · amarillo = sin enviar · rojo = inválido o no coincide.\n"
+                       "% Ref: cuánto pesa el juego Referencia. Sube a 100 cuando el SP cambia más que BANDA; "
+                       "cuando el error entra en BANDA baja a 0 (juego Perturbación) en el tiempo de Mezcla.\n"
+                       "Derivada sobre: E = el error, PV = la medición."
+                  ).pack(side="top", anchor="w")
 
     def _construir_experimento(self, padre):
         lf = ttk.LabelFrame(padre, text="Experimento", padding=6)
@@ -350,7 +411,7 @@ class App:
         e.pack(side="left", fill="x", expand=True, padx=4)
         e.bind("<Return>", lambda _e: self.enviar_directo())
         ttk.Button(fila, text="Enviar", command=self.enviar_directo).pack(side="left")
-        ttk.Label(fila, text="ej. EST, CFG, REG A *", foreground=GRIS).pack(side="left", padx=6)
+        ttk.Label(fila, text="ej. EST, CFG, REG REF *", foreground=GRIS).pack(side="left", padx=6)
 
         self.txt = tk.Text(lf, height=8, font=("Consolas", 9), state="disabled", wrap="none")
         sb = ttk.Scrollbar(lf, command=self.txt.yview)
@@ -362,7 +423,9 @@ class App:
     #  Tabla de ganancias                                                  #
     # ================================================================== #
 
-    def _poner_tabla(self, g: dict, cfg: dict):
+    def _poner_tabla(self, g: dict, modelos: dict, cfg: dict):
+        for (m, c), (_e, var) in self.ent_mod.items():
+            var.set(f"{modelos[m][c]:g}")
         for (m, j, c), (_e, var) in self.ent.items():
             var.set(f"{g[m][j][c]:g}")
         for nombre, (_e, var) in self.ent_cfg.items():
@@ -375,18 +438,35 @@ class App:
         for (m, j, c), (_e, var) in self.ent.items():
             v = _a_float(var.get())
             if v is None or v < 0:
-                raise ValueError(f"{m} {j} {c}: '{var.get()}' no es un número >= 0")
+                raise ValueError(f"{m} {NOMBRE_JUEGO[j]} {c}: '{var.get()}' no es un número >= 0")
             g[m][j][c] = v
+        return g, self._leer_cfg()
+
+    def _leer_cfg(self):
         cfg = {}
-        limites = {"UMAX": (0, 255), "TS": (10, 1000), "BANDA": (0, 1e9)}
         for nombre, (_e, var) in self.ent_cfg.items():
             v = _a_float(var.get())
-            lo, hi = limites[nombre]
+            lo, hi = LIMITES_CFG[nombre]
             if v is None or not lo <= v <= hi:
                 raise ValueError(f"{nombre}: '{var.get()}' fuera de rango [{lo:g}, {hi:g}]")
-            cfg[nombre] = int(v) if nombre == "TS" else v
+            cfg[nombre] = int(v) if nombre in ("TS", "TMEZ") else v
         cfg["DMODE"] = self.var_dmode.get()
-        return g, cfg
+        return cfg
+
+    def _leer_modelos(self):
+        """{motor: {"K":.., "tau":.., "theta":..}} de la tabla. ValueError con el primer campo inválido."""
+        modelos = {m: {} for m in MOTORES}
+        for (m, c), (_e, var) in self.ent_mod.items():
+            v = _a_float(var.get())
+            if v is None or v < 0:
+                raise ValueError(f"Modelo de {m}, {c}: '{var.get()}' no es un número >= 0")
+            modelos[m][c] = v
+        return modelos
+
+    def _colorear_modelo(self, clave):
+        e, var = self.ent_mod[clave]
+        v = _a_float(var.get())
+        e.configure(bg=ROJO_CLARO if v is None or v < 0 else BLANCO)
 
     def _colorear(self, clave):
         e, var = self.ent[clave]
@@ -413,6 +493,77 @@ class App:
             self._colorear(k)
         for k in self.ent_cfg:
             self._colorear_cfg(k)
+
+    # ================================================================== #
+    #  Cálculo de ganancias desde el modelo                                #
+    # ================================================================== #
+
+    def calcular_ganancias(self):
+        """Calcula los juegos Referencia (ITAE) y Perturbación (IAE) de cada motor
+        con modelo y los deja en la tabla. No envía nada a los ESP."""
+        if self.calculando:
+            return
+        try:
+            modelos = self._leer_modelos()
+            cfg = self._leer_cfg()
+            margen = _a_float(self.var_margen.get())
+            if margen is None or margen < 1:
+                raise ValueError(f"Margen de ganancia: '{self.var_margen.get()}' debe ser un número >= 1")
+        except ValueError as e:
+            messagebox.showerror("Calcular ganancias", str(e))
+            return
+        con_modelo = {m: sintonia.Modelo(**modelos[m]) for m in MOTORES
+                      if modelos[m]["K"] > 0 and modelos[m]["tau"] > 0}
+        if not con_modelo:
+            messagebox.showinfo("Calcular ganancias",
+                                "Ningún motor tiene modelo.\nLlena K, τ y θ de los motores que quieras calcular "
+                                "(los que entrega Control Station con la prueba de escalón).")
+            return
+
+        estructura = self.var_estructura.get()
+        self.calculando = True
+        self.btn_calcular.state(["disabled"])
+        self.lbl_calc.configure(text="Calculando…", foreground=NARANJA)
+
+        def trabajo():
+            resultados, errores, hechos = {}, {}, {}
+            for m, modelo in con_modelo.items():
+                try:
+                    if modelo not in hechos:      # motores con el mismo modelo: un solo cálculo
+                        hechos[modelo] = sintonia.calcular_motor(modelo, cfg["TS"] / 1000.0, estructura,
+                                                                 cfg["DMODE"], margen)
+                    resultados[m] = hechos[modelo]
+                except Exception as e:
+                    errores[m] = str(e)
+            self.cola.put(("sintonia", resultados, errores, con_modelo, cfg["TS"], estructura))
+        threading.Thread(target=trabajo, daemon=True).start()
+
+    def _fin_calculo(self, resultados, errores, modelos, ts_ms, estructura):
+        self.calculando = False
+        self.btn_calcular.state(["!disabled"])
+        for m, res in resultados.items():
+            for j in JUEGOS:
+                for c in CAMPOS:
+                    self.ent[(m, j, c)][1].set(f"{res[j].g[c]:g}")
+            partes = []
+            for j in JUEGOS:
+                r = res[j]
+                partes.append(f"{NOMBRE_JUEGO[j]} Kp={r.g['Kp']:g} Ti={r.g['Ti']:g} Td={r.g['Td']:g} "
+                              f"({r.criterio} = {r.costo:.3g}, margen ×{r.margen:.2f}"
+                              f"{', limitada por el margen mínimo' if r.limitado else ''})")
+            self.log(f"{m}: " + " · ".join(partes))
+        for m, err in errores.items():
+            self.log(f"{m}: no se pudo calcular ({err})")
+
+        rapidos = [m for m in resultados if modelos[m].tau < ts_ms / 1000.0]
+        if rapidos:
+            self.log(f"Aviso: TS = {ts_ms} ms es mayor que τ de {', '.join(rapidos)}: ahí el muestreo limita al lazo "
+                     "más que el motor. Con TS de 10 a 20 ms la respuesta mejora mucho (cambia TS y vuelve a calcular).")
+        if resultados:
+            self.lbl_calc.configure(foreground=VERDE, text=f"✓ {estructura} calculado para {', '.join(resultados)} con "
+                                                           f"TS = {ts_ms} ms. Revisa y pulsa «Enviar a los ESP».")
+        else:
+            self.lbl_calc.configure(foreground=ROJO, text="✗ No se pudo calcular (ver consola)")
 
     def enviar_ganancias(self):
         try:
@@ -470,7 +621,7 @@ class App:
             return
         elif pendientes:
             self.lbl_g.configure(text=f"✗ Sin confirmación de: {', '.join(pendientes)} "
-                                      "(¿firmware de sintonización cargado?)", foreground=ROJO)
+                                      "(¿firmware de sintonización actualizado en los ESP?)", foreground=ROJO)
             self.verif = None
         else:
             lados = ", ".join(NOMBRE_LADO[l] for l, e in self.enlaces.items() if e.conectado)
@@ -480,20 +631,21 @@ class App:
     def guardar_archivo(self):
         try:
             g, cfg = self._leer_tabla()
+            modelos = self._leer_modelos()
         except ValueError as e:
             messagebox.showerror("Ganancias", str(e))
             return
-        guardar_ganancias(self.ruta_g, g, cfg)
-        self.log(f"Ganancias guardadas en {self.ruta_g}")
+        guardar_ganancias(self.ruta_g, g, modelos, cfg)
+        self.log(f"Modelos y ganancias guardados en {self.ruta_g}")
 
     def recargar_archivo(self):
         try:
-            g, cfg = cargar_ganancias(self.ruta_g)
+            g, modelos, cfg = cargar_ganancias(self.ruta_g)
         except Exception as e:
             messagebox.showerror("Ganancias", f"No se pudo leer {self.ruta_g.name}:\n{e}")
             return
-        self._poner_tabla(g, cfg)
-        self.log(f"Ganancias recargadas de {self.ruta_g} (falta 'Enviar a los ESP')")
+        self._poner_tabla(g, modelos, cfg)
+        self.log(f"Modelos y ganancias recargados de {self.ruta_g} (falta 'Enviar a los ESP')")
 
     def guardar_en_esp(self):
         activos = [e for e in self.enlaces.values() if e.conectado]
@@ -553,7 +705,11 @@ class App:
         if exp.tipo == "PWM" and max(abs(exp.v0), abs(exp.v1)) > umax:
             self.log(f"Aviso: el firmware limita el PWM a UMAX = {umax:g}")
 
-        meta = {"ganancias": self.g_enviadas, "config": self.cfg_enviada,
+        try:
+            modelos = self._leer_modelos()
+        except ValueError:
+            modelos = None
+        meta = {"ganancias": self.g_enviadas, "modelos": modelos, "config": self.cfg_enviada,
                 "puertos": {l: e.puerto for l, e in self.enlaces.items()}}
         self.ejecutor = Ejecutor(exp, dict(self.enlaces), self.datos, self.carpeta, meta,
                                  lambda ok, estado, ruta: self.cola.put(("exp_fin", ok, estado, ruta)))
@@ -678,6 +834,8 @@ class App:
                     self._conectados(ev[1], ev[2])
                 elif ev[0] == "exp_fin":
                     self._fin_experimento(*ev[1:])
+                elif ev[0] == "sintonia":
+                    self._fin_calculo(*ev[1:])
         except queue.Empty:
             pass
 
@@ -698,7 +856,7 @@ class App:
             if not enl.conectado:
                 txt, color = f"{nombre}: desconectado ({enl.error})", ROJO
             elif not enl.acks_pid and time.monotonic() - self.t_conexion[lado] > 3.0:
-                txt, color = f"{nombre}: {enl.puerto} sin respuesta a comandos (¿firmware original?)", ROJO
+                txt, color = f"{nombre}: {enl.puerto} no confirma ganancias (¿firmware de sintonización actualizado?)", ROJO
             elif edad < 0.5:
                 txt, color = f"{nombre}: {enl.puerto} ✓", VERDE
             elif edad < DATOS_VIEJOS_S:
