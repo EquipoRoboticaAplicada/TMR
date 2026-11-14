@@ -10,3 +10,4 @@ node_modules/
 
 # Registros de experimentos del sintonizador de motores
 motores/sintonizador/registros/
+motores/sintonizador/ganancias.json
