@@ -16,10 +16,14 @@ Qué hace:
     abierto) y, cuando ustedes lo piden, calcula con él los dos juegos de
     ganancias: Referencia (ITAE) y Perturbación (IAE). Ver sintonia.py.
     El firmware mezcla los dos juegos en tiempo real.
+  - Guarda también la zona muerta de cada motor (ZM, en PWM): el firmware se
+    la suma a la salida del PID para saltársela.
   - Muestra en vivo SP, PV y PWM de los 6 motores.
-  - Corre los experimentos que ustedes lanzan (escalón de PWM en lazo abierto
-    o de setpoint en lazo cerrado) en un motor, un lado o los 6 a la vez, y
-    guarda cada uno en registros/ (CSV + JSON con las ganancias usadas).
+  - Corre los experimentos que ustedes lanzan (una escalera de niveles de PWM
+    en lazo abierto, o un escalón de setpoint en lazo cerrado) en un motor, un
+    lado o los 6 a la vez, y guarda cada uno en registros/ (CSV + JSON con las
+    ganancias usadas; en lazo abierto, además un .txt por motor con t, PWM y
+    RPM, listo para Control Station).
   - Nunca cambia ganancias por su cuenta: las calculadas quedan en la tabla
     hasta que ustedes pulsan "Enviar a los ESP".
 
@@ -34,6 +38,7 @@ import json
 import math
 import os
 import queue
+import re
 import subprocess
 import sys
 import threading
@@ -48,7 +53,8 @@ from matplotlib.figure import Figure
 import sintonia
 from enlace import (CAMPOS, JUEGOS, LADOS, MOTORES, NOMBRE_JUEGO, NOMBRE_LADO, WD_MS, EnlaceESP,
                     abrir_puerto, buscar_esps)
-from experimento import DATOS_VIEJOS_S, Datos, Ejecutor, Experimento
+from experimento import (DATOS_VIEJOS_S, Datos, Ejecutor, Experimento, perfil_escalera,
+                         perfil_escalon)
 
 AQUI = Path(__file__).resolve().parent
 
@@ -61,7 +67,17 @@ LIMITES_CFG      = {"UMAX": (0, 255), "TS": (10, 1000), "BANDA": (0, 1e9), "TMEZ
 VENTANA_S   = 20      # segundos visibles en las gráficas
 POLL_MS     = 50      # cola de eventos
 GRAFICA_MS  = 200     # refresco de gráficas
+PUNTOS_GRAFICA = 600  # puntos que se dibujan por curva, como mucho (aprox.)
 COLORES     = ("#1f77b4", "#d62728", "#2ca02c")   # motor 0, 1, 2
+
+TEXTO_PERFIL = {
+    "PWM": "Cada nivel se sostiene el tiempo indicado, en orden, y al final STOP. El PWM se aplica directo: sin PID "
+           "y sin sumar la zona muerta. Durante la prueba el ESP muestrea al periodo indicado y después regresa a "
+           "su TS. Además del registro se guarda un .txt por motor (t, PWM, RPM), igual al de der_escalon.",
+    "SP":  "Perfil: inicial (t antes) → escalón (t escalón) → inicial (t después) → STOP. Los motores no elegidos "
+           "se quedan en SP = 0. Con |SP| ≤ BANDA el motor queda en reposo (PWM 0, frena solo): para ver cómo "
+           "responde el lazo al bajar de velocidad usa un SP inicial distinto de 0.",
+}
 
 BLANCO, AMARILLO, ROJO_CLARO = "white", "#fff3b0", "#ffcdd2"
 VERDE, NARANJA, ROJO, GRIS = "#2e7d32", "#ef6c00", "#c62828", "#757575"
@@ -72,7 +88,8 @@ VERDE, NARANJA, ROJO, GRIS = "#2e7d32", "#ef6c00", "#c62828", "#757575"
 # ---------------------------------------------------------------------- #
 
 def ganancias_defecto():
-    return {m: {j: dict(GANANCIA_DEFECTO) for j in JUEGOS} for m in MOTORES}
+    """Lo que se le manda a los ESP por motor: los dos juegos y la zona muerta (ZM, en PWM)."""
+    return {m: {**{j: dict(GANANCIA_DEFECTO) for j in JUEGOS}, "ZM": 0.0} for m in MOTORES}
 
 
 def modelos_defecto():
@@ -91,6 +108,7 @@ def cargar_ganancias(ruta: Path):
     for m in MOTORES:
         dm = data.get("motores", {}).get(m, {})
         modelos[m].update({c: float(v) for c, v in dm.get("modelo", {}).items() if c in CAMPOS_MODELO})
+        g[m]["ZM"] = float(dm.get("ZM", 0.0))
         for j in JUEGOS:
             g[m][j].update({c: float(v) for c, v in dm.get(j, {}).items() if c in CAMPOS})
     return g, modelos, cfg
@@ -103,7 +121,8 @@ def guardar_ganancias(ruta: Path, g: dict, modelos: dict, cfg: dict):
     lineas = [
         "{",
         '  "_comentario": "modelo: G(s) = K*exp(-theta*s)/(tau*s + 1), K en rpm/PWM, tau y theta en s; '
-        'K = 0 es motor sin identificar. PID en forma ideal u = Kp*[e + (1/Ti)*integral(e) + Td*de/dt], '
+        'K = 0 es motor sin identificar. ZM = zona muerta en PWM que el PID se salta (0 = sin compensar). '
+        'PID en forma ideal u = Kp*[e + (1/Ti)*integral(e) + Td*de/dt], '
         'filtro Td/N. Ti = 0 sin integral, Td = 0 sin derivada, N = 0 sin filtro. '
         'REF = juego para cambios de referencia (ITAE), PERT = juego contra perturbaciones (IAE); '
         'el firmware los mezcla. L = izquierdo (ESP_L), R = derecho (ESP_R). '
@@ -113,7 +132,7 @@ def guardar_ganancias(ruta: Path, g: dict, modelos: dict, cfg: dict):
     ]
     for k, m in enumerate(MOTORES):
         fin = "," if k < len(MOTORES) - 1 else ""
-        lineas.append(f'    "{m}": {{"modelo": {obj(modelos[m])},')
+        lineas.append(f'    "{m}": {{"modelo": {obj(modelos[m])}, "ZM": {json.dumps(g[m]["ZM"])},')
         lineas.append(f'           "REF":    {obj(g[m]["REF"])},')
         lineas.append(f'           "PERT":   {obj(g[m]["PERT"])}}}{fin}')
     lineas += ["  }", "}", ""]
@@ -141,14 +160,12 @@ class App:
         self.ejecutor  = None
         self.buscando  = False
 
-        self.confirmadas = {}     # (motor, juego, campo) → valor confirmado por el firmware
+        self.confirmadas = {}     # (motor, juego, campo) o (motor, "ZM") → valor confirmado por el firmware
         self.cfg_enviada = {}     # config que tienen los ESP
         self.g_enviadas  = None   # ganancias que tienen los ESP (para el registro)
         self.verif       = None   # (ganancias, t_envio) pendiente de confirmar
 
         self.calculando  = False  # hay un cálculo de ganancias corriendo en otro hilo
-
-        self.valores_tipo = {"PWM": {"v0": "0", "v1": "120"}, "SP": {"v0": "0", "v1": "10"}}
 
         self._construir()
         try:
@@ -249,29 +266,35 @@ class App:
         tabla = ttk.Frame(lf)
         tabla.pack(side="top", fill="x")
         negrita = ("Segoe UI", 9, "bold")
-        COL_MODELO, COL_JUEGO, COL_VIVO = 1, {"REF": 5, "PERT": 10}, 15
-        ttk.Label(tabla, text="Modelo de la planta", font=negrita).grid(row=0, column=COL_MODELO, columnspan=3)
+        COL_MODELO, COL_ZM, COL_JUEGO, COL_VIVO = 1, 4, {"REF": 6, "PERT": 11}, 16
+        ttk.Label(tabla, text="Modelo de la planta", font=negrita).grid(row=0, column=COL_MODELO, columnspan=4)
         ttk.Label(tabla, text="Referencia · ITAE", font=negrita).grid(row=0, column=COL_JUEGO["REF"], columnspan=4)
         ttk.Label(tabla, text="Perturbación · IAE", font=negrita).grid(row=0, column=COL_JUEGO["PERT"], columnspan=4)
         ttk.Label(tabla, text="En vivo", font=negrita).grid(row=0, column=COL_VIVO, columnspan=4)
-        encabezados = ["Motor", "K", "τ [s]", "θ [s]", "", "Kp", "Ti [s]", "Td [s]", "N", "",
-                       "Kp", "Ti [s]", "Td [s]", "N", "", "% Ref", "SP", "PV", "u"]
+        encabezados = ["Motor", "K", "τ [s]", "θ [s]", "ZM", "", "Kp", "Ti [s]", "Td [s]", "N", "",
+                       "Kp", "Ti [s]", "Td [s]", "N", "", "% Ref", "SP", "PV", "PWM"]
         for c, txt in enumerate(encabezados):
             ttk.Label(tabla, text=txt, foreground=GRIS).grid(row=1, column=c, padx=2)
-        for c in (4, 9, 14):
-            ttk.Separator(tabla, orient="vertical").grid(row=0, column=c, rowspan=8, sticky="ns", padx=4)
+        for c in (5, 10, 15):
+            ttk.Separator(tabla, orient="vertical").grid(row=0, column=c, rowspan=8, sticky="ns", padx=3)
 
         self.ent = {}       # (motor, juego, campo) → (Entry, StringVar)
         self.ent_mod = {}   # (motor, campo del modelo) → (Entry, StringVar)
+        self.ent_zm = {}    # motor → (Entry, StringVar) de su zona muerta
         self.lbl_vivo = {}
         for fila, m in enumerate(MOTORES, start=2):
             tk.Label(tabla, text=m, fg=COLORES[int(m[1])], font=negrita).grid(row=fila, column=0)
             for cc, campo in enumerate(CAMPOS_MODELO):
                 var = tk.StringVar()
-                e = tk.Entry(tabla, textvariable=var, width=7, justify="right", relief="solid", bd=1)
+                e = tk.Entry(tabla, textvariable=var, width=6, justify="right", relief="solid", bd=1)
                 e.grid(row=fila, column=COL_MODELO + cc, padx=1, pady=1)
                 self.ent_mod[(m, campo)] = (e, var)
                 var.trace_add("write", lambda *_a, k=(m, campo): self._colorear_modelo(k))
+            var = tk.StringVar()
+            e = tk.Entry(tabla, textvariable=var, width=4, justify="right", relief="solid", bd=1)
+            e.grid(row=fila, column=COL_ZM, padx=1, pady=1)
+            self.ent_zm[m] = (e, var)
+            var.trace_add("write", lambda *_a, k=m: self._colorear_zm(k))
             for juego in JUEGOS:
                 for cc, campo in enumerate(CAMPOS):
                     var = tk.StringVar()
@@ -280,13 +303,15 @@ class App:
                     clave = (m, juego, campo)
                     self.ent[clave] = (e, var)
                     var.trace_add("write", lambda *_a, k=clave: self._colorear(k))
-            for cc, campo in enumerate(("reg", "sp", "pv", "u")):
-                lbl = ttk.Label(tabla, text="—", width=6, anchor="e", font=("Consolas", 9))
+            for cc, (campo, ancho) in enumerate((("reg", 4), ("sp", 6), ("pv", 6), ("u", 4))):
+                lbl = ttk.Label(tabla, text="—", width=ancho, anchor="e", font=("Consolas", 9))
                 lbl.grid(row=fila, column=COL_VIVO + cc, padx=1)
                 self.lbl_vivo[(m, campo)] = lbl
         ttk.Label(lf, foreground=GRIS, wraplength=760, justify="left",
-                  text="Modelo: G(s) = K·e^(−θs) / (τs + 1) de la prueba de escalón, con K en rpm/PWM. "
-                       "K = 0: motor sin identificar.").pack(side="top", anchor="w", pady=(2, 0))
+                  text="Modelo: G(s) = K·e^(−θs) / (τs + 1) de la prueba de escalón, con K en rpm/PWM "
+                       "(K = 0: motor sin identificar). ZM: zona muerta en PWM; el PID se la salta "
+                       "sumándola a su salida (0 = sin compensar)."
+                  ).pack(side="top", anchor="w", pady=(2, 0))
 
         cfg_f = ttk.Frame(lf)
         cfg_f.pack(side="top", fill="x", pady=(6, 0))
@@ -331,7 +356,7 @@ class App:
         self.lbl_g = ttk.Label(lf, text="", foreground=GRIS)
         self.lbl_g.pack(side="top", anchor="w", pady=(4, 0))
         ttk.Label(lf, foreground=GRIS, wraplength=760, justify="left",
-                  text="Ganancias: blanco = confirmado por el ESP · amarillo = sin enviar · rojo = inválido o no coincide.\n"
+                  text="Ganancias y ZM: blanco = confirmado por el ESP · amarillo = sin enviar · rojo = inválido o no coincide.\n"
                        "% Ref: cuánto pesa el juego Referencia. Sube a 100 cuando el SP cambia más que BANDA; "
                        "cuando el error entra en BANDA baja a 0 (juego Perturbación) en el tiempo de Mezcla.\n"
                        "Derivada sobre: E = el error, PV = la medición."
@@ -344,8 +369,7 @@ class App:
         fila = ttk.Frame(lf)
         fila.pack(side="top", fill="x")
         self.var_tipo = tk.StringVar(value="PWM")
-        self._tipo_actual = "PWM"
-        ttk.Radiobutton(fila, text="Escalón de PWM (lazo abierto: identificar)", value="PWM",
+        ttk.Radiobutton(fila, text="Escalones de PWM (lazo abierto: identificar)", value="PWM",
                         variable=self.var_tipo, command=self._cambiar_tipo).pack(side="left")
         ttk.Radiobutton(fila, text="Escalón de setpoint (lazo cerrado: validar)", value="SP",
                         variable=self.var_tipo, command=self._cambiar_tipo).pack(side="left", padx=10)
@@ -365,25 +389,45 @@ class App:
             ttk.Button(fila, text=txt,
                        command=lambda s=sel: [self.var_mot[m].set(m in s) for m in MOTORES]).pack(side="left", padx=1)
 
+        # Parámetros: un marco por tipo de experimento; solo se muestra el del tipo elegido
         params = ttk.Frame(lf)
         params.pack(side="top", fill="x", pady=(6, 0))
+        self.marco_tipo = {"PWM": ttk.Frame(params), "SP": ttk.Frame(params)}
+
+        # ---- Lazo abierto: escalera de niveles de PWM, como der_escalon / izq_escalon ----
+        pwm = self.marco_tipo["PWM"]
+        ttk.Label(pwm, text="Niveles de PWM").grid(row=0, column=0, sticky="e", padx=(0, 2))
+        self.var_niveles = tk.StringVar(value="100 150 100")
+        ttk.Entry(pwm, textvariable=self.var_niveles, width=52).grid(row=0, column=1, columnspan=5, sticky="w")
+        ttk.Label(pwm, text="(en orden, separados por espacio)", foreground=GRIS).grid(row=0, column=6, sticky="w", padx=6)
+        ttk.Label(pwm, text="t por nivel [s]").grid(row=1, column=0, sticky="e", padx=(0, 2), pady=(4, 0))
+        self.var_t_nivel = tk.StringVar(value="2")
+        ttk.Entry(pwm, textvariable=self.var_t_nivel, width=7, justify="right").grid(row=1, column=1, sticky="w", pady=(4, 0))
+        ttk.Label(pwm, text="Muestreo [ms]").grid(row=1, column=2, sticky="e", padx=(12, 2), pady=(4, 0))
+        self.var_ts_prueba = tk.StringVar(value="10")
+        ttk.Entry(pwm, textvariable=self.var_ts_prueba, width=5, justify="right").grid(row=1, column=3, sticky="w", pady=(4, 0))
+        self.lbl_escalera = ttk.Label(pwm, text="", foreground=GRIS)
+        self.lbl_escalera.grid(row=1, column=4, columnspan=3, sticky="w", padx=(12, 0), pady=(4, 0))
+        for var in (self.var_niveles, self.var_t_nivel):
+            var.trace_add("write", lambda *_a: self._resumir_escalera())
+
+        # ---- Lazo cerrado: inicial → escalón → inicial ----
+        sp = self.marco_tipo["SP"]
         self.var_exp = {}
-        campos = [("v0", "Valor inicial y final", "0"), ("v1", "Valor del escalón", "120"),
+        campos = [("v0", "SP inicial y final [rpm]", "0"), ("v1", "SP del escalón [rpm]", "10"),
                   ("t_antes", "t antes [s]", "1"), ("t_escalon", "t escalón [s]", "3"), ("t_despues", "t después [s]", "3")]
-        self.lbl_unidad = []
         for k, (clave, etiqueta, defecto) in enumerate(campos):
             r, c = divmod(k, 3)
-            ttk.Label(params, text=etiqueta).grid(row=r, column=c * 3, sticky="e", padx=(8 if c else 0, 2))
+            ttk.Label(sp, text=etiqueta).grid(row=r, column=c * 2, sticky="e", padx=(12 if c else 0, 2), pady=(4 if r else 0, 0))
             var = tk.StringVar(value=defecto)
-            ttk.Entry(params, textvariable=var, width=7, justify="right").grid(row=r, column=c * 3 + 1, sticky="w")
-            if clave in ("v0", "v1"):
-                lbl = ttk.Label(params, text="PWM", foreground=GRIS)
-                lbl.grid(row=r, column=c * 3 + 2, sticky="w")
-                self.lbl_unidad.append(lbl)
+            ttk.Entry(sp, textvariable=var, width=7, justify="right").grid(row=r, column=c * 2 + 1, sticky="w", pady=(4 if r else 0, 0))
             self.var_exp[clave] = var
-        ttk.Label(params, text="Notas").grid(row=2, column=0, sticky="e", pady=(4, 0))
+
+        fila = ttk.Frame(lf)
+        fila.pack(side="top", fill="x", pady=(4, 0))
+        ttk.Label(fila, text="Notas").pack(side="left")
         self.var_notas = tk.StringVar()
-        ttk.Entry(params, textvariable=self.var_notas, width=60).grid(row=2, column=1, columnspan=8, sticky="we", pady=(4, 0))
+        ttk.Entry(fila, textvariable=self.var_notas).pack(side="left", fill="x", expand=True, padx=(4, 0))
 
         fila = ttk.Frame(lf)
         fila.pack(side="top", fill="x", pady=(8, 0))
@@ -394,9 +438,10 @@ class App:
         ttk.Button(fila, text="Abrir registros", command=self.abrir_registros).pack(side="right")
         self.lbl_ultimo = ttk.Label(lf, text="", foreground=GRIS)
         self.lbl_ultimo.pack(side="top", anchor="w", pady=(4, 0))
-        ttk.Label(lf, foreground=GRIS, wraplength=620, justify="left",
-                  text="Perfil: inicial (t antes) → escalón (t escalón) → inicial (t después) → STOP. "
-                       "Los motores no elegidos se quedan en SP = 0. Se registran los 6 motores.").pack(side="top", anchor="w")
+        self.lbl_perfil = ttk.Label(lf, foreground=GRIS, wraplength=760, justify="left")
+        self.lbl_perfil.pack(side="top", anchor="w")
+        self._cambiar_tipo()
+        self._resumir_escalera()
 
     def _construir_consola(self, padre):
         lf = ttk.LabelFrame(padre, text="Consola (mensajes de los ESP y comandos directos)", padding=4)
@@ -426,6 +471,8 @@ class App:
     def _poner_tabla(self, g: dict, modelos: dict, cfg: dict):
         for (m, c), (_e, var) in self.ent_mod.items():
             var.set(f"{modelos[m][c]:g}")
+        for m, (_e, var) in self.ent_zm.items():
+            var.set(f"{g[m]['ZM']:g}")
         for (m, j, c), (_e, var) in self.ent.items():
             var.set(f"{g[m][j][c]:g}")
         for nombre, (_e, var) in self.ent_cfg.items():
@@ -440,7 +487,15 @@ class App:
             if v is None or v < 0:
                 raise ValueError(f"{m} {NOMBRE_JUEGO[j]} {c}: '{var.get()}' no es un número >= 0")
             g[m][j][c] = v
-        return g, self._leer_cfg()
+        cfg = self._leer_cfg()
+        for m, (_e, var) in self.ent_zm.items():
+            v = _a_float(var.get())
+            if v is None or v < 0:
+                raise ValueError(f"Zona muerta de {m}: '{var.get()}' no es un número >= 0")
+            if v > 0 and v >= cfg["UMAX"]:
+                raise ValueError(f"Zona muerta de {m}: debe ser menor que UMAX ({cfg['UMAX']:g})")
+            g[m]["ZM"] = v
+        return g, cfg
 
     def _leer_cfg(self):
         cfg = {}
@@ -468,6 +523,16 @@ class App:
         v = _a_float(var.get())
         e.configure(bg=ROJO_CLARO if v is None or v < 0 else BLANCO)
 
+    def _colorear_zm(self, m):
+        e, var = self.ent_zm[m]
+        v = _a_float(var.get())
+        if v is None or v < 0:
+            e.configure(bg=ROJO_CLARO)
+        elif (m, "ZM") in self.confirmadas and math.isclose(v, self.confirmadas[(m, "ZM")], abs_tol=1e-9):
+            e.configure(bg=BLANCO)
+        else:
+            e.configure(bg=AMARILLO)
+
     def _colorear(self, clave):
         e, var = self.ent[clave]
         v = _a_float(var.get())
@@ -491,8 +556,17 @@ class App:
     def _recolorear_todo(self):
         for k in self.ent:
             self._colorear(k)
+        for m in self.ent_zm:
+            self._colorear_zm(m)
         for k in self.ent_cfg:
             self._colorear_cfg(k)
+
+    def _sin_confirmar(self, con_config: bool = False) -> bool:
+        """True si alguna ganancia o zona muerta (o la configuración) no está confirmada por el ESP."""
+        celdas = list(self.ent.values()) + list(self.ent_zm.values())
+        if con_config:
+            celdas += list(self.ent_cfg.values())
+        return any(e.cget("bg") != BLANCO for e, _v in celdas)
 
     # ================================================================== #
     #  Cálculo de ganancias desde el modelo                                #
@@ -599,21 +673,21 @@ class App:
             if not enl.conectado:
                 continue
             for (m, j), ok in enl.verificar_ganancias(g).items():
+                # Lo que cubre cada acuse del ESP: la zona muerta, o las 4 ganancias de un juego
+                valores = {(m, "ZM"): g[m]["ZM"]} if j == "ZM" else {(m, j, c): g[m][j][c] for c in CAMPOS}
                 if ok:
-                    for c in CAMPOS:
-                        self.confirmadas[(m, j, c)] = g[m][j][c]
+                    self.confirmadas.update(valores)
                 elif ok is None:
                     pendientes.append(f"{m} {j}")
                 else:
                     malos.append(f"{m} {j}")
-                    for c in CAMPOS:
-                        self.confirmadas.pop((m, j, c), None)
-                        self.ent[(m, j, c)][0].configure(bg=ROJO_CLARO)
+                    for clave in valores:
+                        self.confirmadas.pop(clave, None)
         self._recolorear_todo()
         for m_j in malos:
             m, j = m_j.split()
-            for c in CAMPOS:
-                self.ent[(m, j, c)][0].configure(bg=ROJO_CLARO)
+            for e in ([self.ent_zm[m][0]] if j == "ZM" else [self.ent[(m, j, c)][0] for c in CAMPOS]):
+                e.configure(bg=ROJO_CLARO)
         if malos:
             self.lbl_g.configure(text=f"✗ El ESP confirmó otros valores en: {', '.join(malos)}", foreground=ROJO)
             self.verif = None
@@ -653,12 +727,12 @@ class App:
             self.log("No hay ESP conectados")
             return
         aviso = ""
-        if any(e.cget("bg") != BLANCO for e, _v in list(self.ent.values()) + list(self.ent_cfg.values())):
+        if self._sin_confirmar(con_config=True):
             aviso = "\n\nOjo: la tabla tiene cambios sin enviar o sin confirmar. Se guarda lo que tiene cada ESP ahora."
         if not messagebox.askyesno("Guardar en los ESP",
-                                   "Se guardan en la memoria de los ESP32 conectados las ganancias y la "
-                                   "configuración que tienen ahora. Las cargarán al reiniciar, también "
-                                   "cuando se usen con connect.py." + aviso):
+                                   "Se guardan en la memoria de los ESP32 conectados las ganancias, la zona "
+                                   "muerta y la configuración que tienen ahora. Las cargarán al reiniciar, "
+                                   "también cuando se usen con connect.py." + aviso):
             return
         for enl in activos:
             enl.enviar("WD 0")          # que el watchdog no quede guardado encendido
@@ -671,27 +745,53 @@ class App:
     # ================================================================== #
 
     def _cambiar_tipo(self):
-        nuevo = self.var_tipo.get()
-        if nuevo == self._tipo_actual:
-            return
-        self.valores_tipo[self._tipo_actual] = {k: self.var_exp[k].get() for k in ("v0", "v1")}
-        for k, v in self.valores_tipo[nuevo].items():
-            self.var_exp[k].set(v)
-        for lbl in self.lbl_unidad:
-            lbl.configure(text="PWM" if nuevo == "PWM" else "rpm")
-        self._tipo_actual = nuevo
+        """Muestra los parámetros y la explicación del tipo de experimento elegido."""
+        tipo = self.var_tipo.get()
+        for marco in self.marco_tipo.values():
+            marco.pack_forget()
+        self.marco_tipo[tipo].pack(side="top", fill="x")
+        self.lbl_perfil.configure(text=TEXTO_PERFIL[tipo])
+
+    def _resumir_escalera(self):
+        niveles = _a_niveles(self.var_niveles.get())
+        t_nivel = _a_float(self.var_t_nivel.get())
+        if not niveles or t_nivel is None or t_nivel <= 0:
+            self.lbl_escalera.configure(text="niveles o tiempo inválidos", foreground=ROJO)
+        else:
+            self.lbl_escalera.configure(foreground=GRIS, text=f"{len(niveles)} nivel(es) · {len(niveles) * t_nivel:g} s en total")
+
+    def _perfil_de_la_pantalla(self):
+        """(perfil, muestreo de la prueba en ms o None) según el tipo elegido. ValueError si algo está mal."""
+        if self.var_tipo.get() == "PWM":
+            niveles = _a_niveles(self.var_niveles.get())
+            t_nivel = _a_float(self.var_t_nivel.get())
+            ts = _a_float(self.var_ts_prueba.get())
+            if not niveles:
+                raise ValueError("Niveles de PWM: escribe uno o más números separados por espacio, ej. 100 150 100")
+            if t_nivel is None:
+                raise ValueError("t por nivel: no es un número")
+            if ts is None or ts != int(ts):
+                raise ValueError("Muestreo: debe ser un número entero de milisegundos")
+            return perfil_escalera(niveles, t_nivel), int(ts)
+        valores = {k: _a_float(v.get()) for k, v in self.var_exp.items()}
+        malos = [k for k, v in valores.items() if v is None]
+        if malos:
+            raise ValueError(f"Valor inválido en: {', '.join(malos)}")
+        if valores["t_escalon"] <= 0:
+            raise ValueError("t escalón debe ser > 0")
+        return perfil_escalon(**valores), None
 
     def iniciar_experimento(self):
         if self.ejecutor is not None and self.ejecutor.is_alive():
             return
-        valores = {k: _a_float(v.get()) for k, v in self.var_exp.items()}
-        malos = [k for k, v in valores.items() if v is None]
-        if malos:
-            messagebox.showerror("Experimento", f"Valor inválido en: {', '.join(malos)}")
+        try:
+            perfil, ts_prueba = self._perfil_de_la_pantalla()
+        except ValueError as e:
+            messagebox.showerror("Experimento", str(e))
             return
         exp = Experimento(tipo=self.var_tipo.get(),
                           motores=[m for m in MOTORES if self.var_mot[m].get()],
-                          notas=self.var_notas.get().strip(), **valores)
+                          perfil=perfil, ts_ms=ts_prueba, notas=self.var_notas.get().strip())
         errores = exp.validar()
         faltan = [NOMBRE_LADO[l] for l in exp.lados if not (l in self.enlaces and self.enlaces[l].conectado)]
         if faltan:
@@ -699,11 +799,15 @@ class App:
         if errores:
             messagebox.showerror("Experimento", "\n".join(errores))
             return
-        if any(e.cget("bg") != BLANCO for e, _v in self.ent.values()):
+        if exp.tipo == "SP" and self._sin_confirmar():
             self.log("Aviso: la tabla tiene cambios sin enviar; el experimento usa las ganancias que ya tienen los ESP")
         umax = self.cfg_enviada.get("UMAX", 255)
-        if exp.tipo == "PWM" and max(abs(exp.v0), abs(exp.v1)) > umax:
+        if exp.tipo == "PWM" and max(abs(v) for _d, v in exp.perfil) > umax:
             self.log(f"Aviso: el firmware limita el PWM a UMAX = {umax:g}")
+        ts_normal = self.cfg_enviada.get("TS")
+        if exp.ts_ms is not None and ts_normal is None:
+            self.log("Aviso: aún no se le ha enviado la configuración a los ESP, así que la prueba corre con el "
+                     "muestreo que tengan y no con el de la prueba")
 
         try:
             modelos = self._leer_modelos()
@@ -712,20 +816,22 @@ class App:
         meta = {"ganancias": self.g_enviadas, "modelos": modelos, "config": self.cfg_enviada,
                 "puertos": {l: e.puerto for l, e in self.enlaces.items()}}
         self.ejecutor = Ejecutor(exp, dict(self.enlaces), self.datos, self.carpeta, meta,
-                                 lambda ok, estado, ruta: self.cola.put(("exp_fin", ok, estado, ruta)))
+                                 lambda ok, estado, ruta, txt: self.cola.put(("exp_fin", ok, estado, ruta, txt)),
+                                 ts_normal_ms=ts_normal)
         self.ejecutor.start()
         self.btn_iniciar.state(["disabled"])
         self.btn_reconectar.state(["disabled"])
-        self.log(f"Experimento {exp.tipo} en {exp.etiqueta_motores()}: {exp.v0:g} → {exp.v1:g} → {exp.v0:g}, "
-                 f"{exp.duracion:.1f} s")
+        self.log(f"Experimento {exp.tipo} en {exp.etiqueta_motores()}: {exp.resumen()}, {exp.duracion:.1f} s")
 
-    def _fin_experimento(self, ok, estado, ruta):
+    def _fin_experimento(self, ok, estado, ruta, rutas_txt):
         self.btn_iniciar.state(["!disabled"])
         self.btn_reconectar.state(["!disabled"])
         self.lbl_prog.configure(text=("✓ Terminado" if ok else f"✗ {estado}"), foreground=VERDE if ok else ROJO)
         if ruta is not None:
             self.lbl_ultimo.configure(text=f"Último registro: {ruta.name}")
             self.log(f"Experimento {estado}. Registro: {ruta}")
+            if rutas_txt:
+                self.log("Datos por motor (t, PWM, RPM) para Control Station: " + ", ".join(r.name for r in rutas_txt))
         else:
             self.log(f"Experimento no iniciado: {estado}")
 
@@ -875,10 +981,12 @@ class App:
                 self.lbl_vivo[(m, campo)].configure(text=v)
 
     def _tick_grafica(self):
+        espera = GRAFICA_MS
         if not self.var_pausa.get():
             ahora = time.monotonic()
             for m in MOTORES:
                 pts = self.datos.recientes(m, ahora - VENTANA_S)
+                pts = pts[::max(1, len(pts) // PUNTOS_GRAFICA)]   # con muestreo rápido sobran puntos para la pantalla
                 t = [p.t_pc - ahora for p in pts]
                 self.lin[(m, "pv")].set_data(t, [p.pv for p in pts])
                 self.lin[(m, "sp")].set_data(t, [p.sp for p in pts])
@@ -886,8 +994,11 @@ class App:
             for (lado, tipo), ax in self.ax.items():
                 ax.set_xlim(-VENTANA_S, 0)
                 _escalar_y(ax, self.lineas_ax[(lado, tipo)], 2.0 if tipo == "v" else 20.0)
-            self.canvas.draw_idle()
-        self.root.after(GRAFICA_MS, self._tick_grafica)
+            self.canvas.draw()
+            # Si dibujar tarda (laptop lenta, muchos datos), el refresco se espacia: la
+            # ventana debe pasar más tiempo atendiendo botones y teclas (PARO) que dibujando.
+            espera = max(GRAFICA_MS, int(2000 * (time.monotonic() - ahora)))
+        self.root.after(espera, self._tick_grafica)
 
 
 def _a_float(texto: str):
@@ -896,6 +1007,13 @@ def _a_float(texto: str):
     except ValueError:
         return None
     return v if math.isfinite(v) else None
+
+
+def _a_niveles(texto: str):
+    """Lista de números de un texto separado por espacios, comas o punto y coma.
+    None si algo no es un número; lista vacía si no hay nada."""
+    niveles = [_a_float(p) for p in re.split(r"[\s,;]+", texto.strip()) if p]
+    return None if any(v is None for v in niveles) else niveles
 
 
 def _escalar_y(ax, lineas, span_min: float):

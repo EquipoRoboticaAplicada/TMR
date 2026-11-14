@@ -30,6 +30,7 @@ WD_MS    = 500    # watchdog del firmware mientras la herramienta está conectad
 LATIDO_S = 0.15   # periodo del latido ("# HB": el firmware lo cuenta como comando y lo ignora)
 
 _RE_PID_ACK = re.compile(r"^# PID (REF|PERT) ([0-2]) (\S+) (\S+) (\S+) (\S+)$")
+_RE_ZM_ACK  = re.compile(r"^# ZM ([0-2]) (\S+)$")
 _RE_CSV     = re.compile(r"^\d+,[0-2],(?:M|\d+),")
 _RE_PLOT    = re.compile(r"^SP\d:")
 
@@ -178,6 +179,7 @@ class EnlaceESP:
 
         self.ultima_muestra_t = 0.0
         self.acks_pid = {}      # (juego, motor) → (Kp, Ti, Td, N) confirmados por el firmware
+        self.acks_zm  = {}      # motor → zona muerta [PWM] confirmada por el firmware
         self.error    = None
 
         self._hilo_rx     = threading.Thread(target=self._leer, daemon=True)
@@ -213,7 +215,7 @@ class EnlaceESP:
     def configurar(self, ganancias=None, cfg=None):
         """Deja el firmware listo para la herramienta y, si se dan, le carga las ganancias.
 
-        ganancias: {"L0": {"REF": {"Kp":..,"Ti":..,"Td":..,"N":..}, "PERT": {...}}, ...}
+        ganancias: {"L0": {"REF": {"Kp":..,"Ti":..,"Td":..,"N":..}, "PERT": {...}, "ZM": pwm}, ...}
         cfg: {"UMAX":.., "TS":.., "BANDA":.., "TMEZ":.., "DMODE": "E"|"PV"}
         """
         for linea in ("STOP", f"WD {WD_MS}", "VER *"):
@@ -230,16 +232,20 @@ class EnlaceESP:
         self.enviar(f"DMODE {cfg['DMODE']}")
         for i in range(3):
             g_motor = ganancias[f"{self.lado}{i}"]
+            self.acks_zm.pop(i, None)
+            self.enviar(f"ZM {i} {fmt_num(g_motor['ZM'])}")
             for juego in JUEGOS:
                 self.acks_pid.pop((juego, i), None)
                 g = g_motor[juego]
                 self.enviar(f"PID {juego} {i} " + " ".join(fmt_num(g[c]) for c in CAMPOS))
 
     def verificar_ganancias(self, ganancias: dict) -> dict:
-        """{(motor_id, juego): True | False | None (aún sin confirmación)}"""
+        """{(motor_id, juego o "ZM"): True | False | None (aún sin confirmación)}"""
         res = {}
         for i in range(3):
             mid = f"{self.lado}{i}"
+            zm = self.acks_zm.get(i)      # el firmware la confirma con 1 decimal
+            res[(mid, "ZM")] = None if zm is None else abs(zm - ganancias[mid]["ZM"]) <= 0.051
             for juego in JUEGOS:
                 ack = self.acks_pid.get((juego, i))
                 if ack is None:
@@ -282,6 +288,12 @@ class EnlaceESP:
             if ack:
                 try:
                     self.acks_pid[(ack.group(1), int(ack.group(2)))] = tuple(float(ack.group(k)) for k in range(3, 7))
+                except ValueError:
+                    pass
+            ack = _RE_ZM_ACK.match(linea)
+            if ack:
+                try:
+                    self.acks_zm[int(ack.group(1))] = float(ack.group(2))
                 except ValueError:
                     pass
             self._on_msg(self.lado, linea[2:])

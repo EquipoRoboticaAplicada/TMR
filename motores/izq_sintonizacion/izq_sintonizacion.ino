@@ -55,6 +55,21 @@
     Anti-windup: la integral se congela si empujaría la salida más allá de
     UMAX, y se limita a ±UMAX.
 
+  Zona muerta (ZM, una por motor, en PWM): por debajo de cierto PWM el motor
+  no se mueve. El PID calcula como si el motor respondiera desde PWM 0 y a su
+  salida se le suma ZM en el sentido de giro, de modo que el driver nunca
+  recibe un PWM dentro de la zona muerta:
+        PWM aplicado = u + ZM   (u > 0)        u - ZM   (u < 0)        0   (u ≈ 0)
+    - La salida del PID queda limitada a ±(UMAX - ZM): el PWM aplicado nunca
+      pasa de UMAX.
+    - En lazo abierto (MAN) el PWM se aplica tal cual, sin sumar ZM.
+    - ZM = 0 deja el PWM igual a la salida del PID.
+
+  Reposo: con |SP| <= BANDA no se pide velocidad, así que el PID no actúa: el
+  PWM es 0 (el IBT-2 deja el motor en corto y frena solo) y la integral se
+  reinicia. Mantener el lazo cerrado en SP = 0 hace vibrar la rueda, porque
+  cerca de cero el encoder da muy pocas cuentas por muestra.
+
   Velocidad: las cuentas del encoder se dividen entre el tiempo real del
   primer al último flanco de la muestra, no entre el periodo de muestreo. Así
   la medición no se cuantiza y TS se puede bajar a 10-20 ms, que es lo que
@@ -73,6 +88,7 @@
     MAN m <pwm>               lazo abierto: PWM fijo (para identificar la planta)
     AUTO m                    regresar al PID sin salto en la salida
     UMAX <0-255>              límite de |PWM| (PID y MAN)
+    ZM m <pwm>                zona muerta del motor que el PID se salta (0 = sin compensar)
     BANDA <rpm>               cambio de SP que activa REF y error que cuenta como "llegó"
     TMEZ <ms>                 duración de la rampa de REF a PERT (0 = cambio directo)
     TS <ms>                   tiempo de muestreo (10-1000)
@@ -93,6 +109,7 @@
 
 #include <Preferences.h>
 #include <stdarg.h>
+#include <stddef.h>
 
 // ===========================================================================
 //  LADO — lo único que cambia entre der_sintonizacion e izq_sintonizacion
@@ -164,6 +181,9 @@ struct Config {
   uint16_t  wdMs;      // watchdog de comandos [ms], 0 = apagado
   uint16_t  tMezMs;    // rampa de REF a PERT [ms], 0 = cambio directo
   uint8_t   dSobrePV;  // 0 = derivada sobre el error (ideal), 1 = sobre la medición
+  // Lo nuevo va siempre al final: así una configuración guardada con una
+  // versión anterior se puede seguir leyendo (ver cargarNVS).
+  float     zm[3];     // zona muerta de cada motor [PWM], 0 = sin compensar
 };
 
 struct Motor {
@@ -171,7 +191,8 @@ struct Motor {
   float   pv = 0.0f;          // velocidad medida [rpm eje de salida]
   float   e  = 0.0f;
   float   P = 0.0f, I = 0.0f, D = 0.0f;   // términos del PID [PWM]
-  float   u  = 0.0f;          // salida aplicada [PWM]
+  float   u  = 0.0f;          // salida del PID (o PWM manual) antes de sumar la zona muerta
+  float   pwm = 0.0f;         // PWM que recibe el driver
   float   ePrev = 0.0f, pvPrev = 0.0f;
   bool    inicializado = false;   // false → la siguiente muestra no calcula derivada
   bool    manual = false;         // true → lazo abierto con uManual
@@ -203,7 +224,10 @@ const float     BANDA_DEFECTO     = 0.5f;   // rpm
 const uint16_t  TS_DEFECTO        = 100;    // ms, igual que izq.ino
 const uint16_t  TMEZ_DEFECTO      = 500;    // ms
 
-const uint32_t CFG_VERSION = 0x50494402;   // cambiar si se modifica struct Config
+const uint32_t CFG_VERSION        = 0x50494403;   // cambiar si se modifica struct Config
+const uint32_t CFG_VERSION_SIN_ZM = 0x50494402;   // la anterior: igual, pero sin zm[] al final
+const float    U_MINIMA           = 1.0f;         // |salida del PID| menor que esto cuenta como 0 [PWM]
+const float    SP_CERO            = 0.01f;        // con BANDA = 0, |SP| hasta esto sigue siendo reposo [rpm]
 const char*    NVS_NS      = "pid_tuning";
 const char*    NVS_KEY     = "cfg";
 
@@ -275,6 +299,7 @@ void cargarDefectos() {
   for (int i = 0; i < 3; i++) {
     cfg.g[i][REF]  = GANANCIAS_DEFECTO;
     cfg.g[i][PERT] = GANANCIAS_DEFECTO;
+    cfg.zm[i]      = 0.0f;
   }
   cfg.uMax     = UMAX_DEFECTO;
   cfg.banda    = BANDA_DEFECTO;
@@ -286,11 +311,21 @@ void cargarDefectos() {
 
 bool cargarNVS() {
   if (!prefs.begin(NVS_NS, true)) return false;   // aún no hay nada guardado
-  bool ok = false;
-  if (prefs.getBytesLength(NVS_KEY) == sizeof(Config)) {
-    Config tmp;
+  bool   ok  = false;
+  size_t len = prefs.getBytesLength(NVS_KEY);
+  Config tmp;
+  if (len == sizeof(Config)) {
     prefs.getBytes(NVS_KEY, &tmp, sizeof(tmp));
     if (tmp.version == CFG_VERSION) {
+      cfg = tmp;
+      ok = true;
+    }
+  } else if (len == offsetof(Config, zm)) {
+    // Guardada antes de que existiera la zona muerta: mismo contenido, sin zm[]
+    prefs.getBytes(NVS_KEY, &tmp, len);
+    if (tmp.version == CFG_VERSION_SIN_ZM) {
+      for (int i = 0; i < 3; i++) tmp.zm[i] = 0.0f;
+      tmp.version = CFG_VERSION;
       cfg = tmp;
       ok = true;
     }
@@ -372,6 +407,23 @@ Paralela mezclar(int i, float alfa) {
   return k;
 }
 
+// PWM que se le da al driver para una salida u del PID: se suma la zona muerta
+// en el sentido de giro, así el PID trabaja como si el motor respondiera desde
+// PWM 0. Una salida casi nula se queda en 0, para no saltar entre +zm y -zm.
+float saltarZonaMuerta(float u, float zm) {
+  if (zm <= 0.0f)    return u;
+  if (u >  U_MINIMA) return u + zm;
+  if (u < -U_MINIMA) return u - zm;
+  return 0.0f;
+}
+
+// La operación inversa: salida del PID que corresponde a un PWM aplicado
+float quitarZonaMuerta(float pwm, float zm) {
+  if (pwm >  zm) return pwm - zm;
+  if (pwm < -zm) return pwm + zm;
+  return 0.0f;
+}
+
 void pasoControl(int i, float dt, uint32_t dtMuestraUs) {
   Motor& m = mot[i];
 
@@ -397,13 +449,27 @@ void pasoControl(int i, float dt, uint32_t dtMuestraUs) {
   m.ePrev  = m.e;
   m.pvPrev = m.pv;
 
+  float zm   = cfg.zm[i];
+  float uLim = (cfg.uMax > zm) ? cfg.uMax - zm : 0.0f;   // lo que le queda al PID: zm se suma después
+
   if (m.manual) {
-    // Lazo abierto: P y D se calculan solo para mostrarlos
-    m.u = constrain(m.uManual, -cfg.uMax, cfg.uMax);
+    // Lazo abierto: PWM directo, sin zona muerta. P y D se calculan solo para mostrarlos
+    m.u   = constrain(m.uManual, -cfg.uMax, cfg.uMax);
+    m.pwm = m.u;
+  } else if (fabsf(m.sp) <= ((cfg.banda > SP_CERO) ? cfg.banda : SP_CERO)) {
+    // Reposo: sin velocidad pedida no hay nada que controlar. Con PWM 0 el IBT-2
+    // deja el motor en corto y frena solo. Si el PID siguiera activo en SP = 0,
+    // la resolución del encoder cerca de cero bastaría para que la salida saltara
+    // de un lado a otro de la zona muerta y la rueda vibrara; y al pasar de una
+    // velocidad a SP = 0 daría un tirón en reversa.
+    m.I   = 0.0f;
+    m.u   = 0.0f;
+    m.pwm = 0.0f;
+    m.bumpless = false;
   } else {
     // Bumpless MAN → AUTO: la integral absorbe la diferencia
     if (m.bumpless) {
-      m.I = m.u - m.P - m.D;
+      m.I = quitarZonaMuerta(m.pwm, zm) - m.P - m.D;
       m.bumpless = false;
     }
 
@@ -411,17 +477,18 @@ void pasoControl(int i, float dt, uint32_t dtMuestraUs) {
     if (k.ki > 0.0f) {
       float dI = k.ki * m.e * dt;
       float uPrueba = m.P + m.I + dI + m.D;
-      bool  satura  = (uPrueba > cfg.uMax && dI > 0.0f) || (uPrueba < -cfg.uMax && dI < 0.0f);
+      bool  satura  = (uPrueba > uLim && dI > 0.0f) || (uPrueba < -uLim && dI < 0.0f);
       if (!satura) m.I += dI;
-      m.I = constrain(m.I, -cfg.uMax, cfg.uMax);
+      m.I = constrain(m.I, -uLim, uLim);
     } else {
       m.I = 0.0f;
     }
 
-    m.u = constrain(m.P + m.I + m.D, -cfg.uMax, cfg.uMax);
+    m.u   = constrain(m.P + m.I + m.D, -uLim, uLim);
+    m.pwm = saltarZonaMuerta(m.u, zm);
   }
 
-  setMotor(i, (int)lroundf(m.u));
+  setMotor(i, (int)lroundf(m.pwm));
 }
 
 // ===========================================================================
@@ -462,7 +529,7 @@ void imprimirMuestra(unsigned long t) {
       for (int i = 0; i < 3; i++) {
         if (!(verMask & (1 << i))) continue;
         Serial.printf("%sSP%d:%.2f,PV%d:%.2f,U%d:%.1f",
-                      primero ? "" : ",", i, mot[i].sp, i, mot[i].pv, i, mot[i].u);
+                      primero ? "" : ",", i, mot[i].sp, i, mot[i].pv, i, mot[i].pwm);
         primero = false;
       }
       Serial.println();
@@ -470,6 +537,7 @@ void imprimirMuestra(unsigned long t) {
     }
     case OUT_CSV: {
       // reg: "M" en manual, o el porcentaje del juego REF en la mezcla (0-100)
+      // u:   PWM que recibe el driver (la salida del PID más la zona muerta)
       for (int i = 0; i < 3; i++) {
         if (!(verMask & (1 << i))) continue;
         const Motor& m = mot[i];
@@ -477,7 +545,7 @@ void imprimirMuestra(unsigned long t) {
         if (m.manual) strcpy(reg, "M");
         else          snprintf(reg, sizeof(reg), "%d", (int)lroundf(m.alfa * 100.0f));
         Serial.printf("%lu,%d,%s,%.3f,%.3f,%.3f,%.1f,%.1f,%.1f,%.1f\n",
-                      t, i, reg, m.sp, m.pv, m.e, m.P, m.I, m.D, m.u);
+                      t, i, reg, m.sp, m.pv, m.e, m.P, m.I, m.D, m.pwm);
       }
       break;
     }
@@ -500,6 +568,12 @@ void imprimirGanancias(uint8_t motores, uint8_t juegos) {
   }
 }
 
+void imprimirZM(uint8_t motores) {
+  for (int i = 0; i < 3; i++) {
+    if (motores & (1 << i)) Serial.printf("# ZM %d %.1f\n", i, cfg.zm[i]);
+  }
+}
+
 void imprimirVer() {
   if (verMask == 0b111) msg("VER *");
   else for (int i = 0; i < 3; i++) if (verMask & (1 << i)) msg("VER %d", i);
@@ -511,6 +585,7 @@ void imprimirConfig() {
   msg("      J    m   Kp      Ti[s]   Td[s]   N");
   imprimirGanancias(0b111, 0b11);
   msg("UMAX %.0f", cfg.uMax);
+  imprimirZM(0b111);
   msg("BANDA %.2f", cfg.banda);
   msg("TMEZ %u", cfg.tMezMs);
   msg("TS %u", cfg.tsMs);
@@ -524,9 +599,9 @@ void imprimirEstado() {
   for (int i = 0; i < 3; i++) {
     const Motor& m = mot[i];
     const char* forz = (m.forzado == REG_AUTO) ? "auto" : "fijo";
-    msg("m%d %s REF=%.0f%%(%s) SP=%.2f PV=%.2f e=%.2f P=%.1f I=%.1f D=%.1f u=%.0f enc=%ld",
+    msg("m%d %s REF=%.0f%%(%s) SP=%.2f PV=%.2f e=%.2f P=%.1f I=%.1f D=%.1f PWM=%.0f enc=%ld",
         i, m.manual ? "MAN " : "AUTO", m.alfa * 100.0f, forz,
-        m.sp, m.pv, m.e, m.P, m.I, m.D, m.u, m.cuenta);
+        m.sp, m.pv, m.e, m.P, m.I, m.D, m.pwm, m.cuenta);
   }
   if (cfg.wdMs > 0) msg("watchdog %u ms%s", cfg.wdMs, wdDisparado ? " (DISPARADO: SP = 0)" : "");
 }
@@ -541,6 +616,7 @@ void imprimirAyuda() {
   msg("MAN m <pwm>              lazo abierto, PWM fijo -255..255");
   msg("AUTO m                   regresar al PID sin salto");
   msg("UMAX <0-255>             límite de |PWM|");
+  msg("ZM m <pwm>               zona muerta que el PID se salta (0 = sin compensar), ej. ZM * 15");
   msg("BANDA <rpm>              cambio de SP que activa REF y error que cuenta como llegada");
   msg("TMEZ <ms>                rampa de REF a PERT al llegar (0 = directo)");
   msg("TS <ms>                  tiempo de muestreo, 10-1000");
@@ -634,6 +710,7 @@ void cmdStop() {
     m.uManual = 0.0f;
     m.sp      = 0.0f;
     m.u       = 0.0f;
+    m.pwm     = 0.0f;
     reiniciarEstado(m);
     setMotor(i, 0);
   }
@@ -716,6 +793,14 @@ void procesarLinea(char* linea) {
     if (n != 2 || !aNumero(tok[1], v) || v < 0 || v > PWM_MAX) { msg("Uso: UMAX <0-255>"); return; }
     cfg.uMax = v;
     msg("UMAX %.0f", v);
+  }
+  else if (es(c, "ZM")) {
+    if (n != 3 || !(ms = parseMotores(tok[1])) || !aNumero(tok[2], v) || v < 0 || v >= PWM_MAX) {
+      msg("Uso: ZM <0|1|2|*> <pwm 0-254>");
+      return;
+    }
+    for (int i = 0; i < 3; i++) if (ms & (1 << i)) cfg.zm[i] = v;
+    imprimirZM(ms);
   }
   else if (es(c, "BANDA")) {
     if (n != 2 || !aNumero(tok[1], v) || v < 0) { msg("Uso: BANDA <rpm >= 0>"); return; }

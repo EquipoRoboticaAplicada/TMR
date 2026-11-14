@@ -164,6 +164,18 @@ def analizar(ruta: Path, args):
     if vecinos:
         print("    si se amplía el tramo: " + "; ".join(vecinos))
 
+    # Zona muerta: el PWM en que la recta del rango lineal cruza PV = 0. Sumarle ese
+    # PWM a la salida del PID deja al motor respondiendo como una recta desde cero.
+    if a["k"] != 0:
+        zm = max(0.0, -a["c"] / a["k"])
+        print(f"  Zona muerta estimada (ZM del sintonizador): PWM {zm:.1f}"
+              "   (donde la recta del rango lineal cruza PV = 0)")
+        quietos = [p["pwm"] for p in puntos if p["pwm"] > 0 and abs(p["media"]) < 0.05]
+        if quietos and puntos[-1]["pwm"] > max(quietos):
+            siguiente = min(p["pwm"] for p in puntos if p["pwm"] > max(quietos))
+            print(f"    desde reposo el motor arrancó entre PWM {max(quietos):g} y {siguiente:g}: para vencer la "
+                  "fricción estática hace falta más que para seguir girando")
+
     # Escalón para Control Station: dentro del rango, con un nivel de margen por lado si caben
     a_lo, a_hi = (puntos[i + 1], puntos[j - 1]) if j - i >= 3 else (lo, hi)
     print(f"  Escalón sugerido para Control Station: PWM {a_lo['pwm']:g} -> {a_hi['pwm']:g} -> {a_lo['pwm']:g}"
@@ -172,12 +184,12 @@ def analizar(ruta: Path, args):
 
 
 def reunir_archivos(rutas):
-    """Archivos a analizar: los dados, o los .txt/.csv de las carpetas dadas."""
+    """Archivos a analizar: los dados, o los .txt de las carpetas dadas."""
     archivos = []
     for r in rutas:
         r = Path(r)
         if r.is_dir():
-            archivos += sorted(p for p in r.iterdir() if p.suffix.lower() in (".txt", ".csv"))
+            archivos += sorted(p for p in r.iterdir() if p.suffix.lower() == ".txt")
         elif r.is_file():
             archivos.append(r)
         else:
