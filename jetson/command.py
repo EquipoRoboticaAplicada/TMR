@@ -1,5 +1,6 @@
 # command.py
 import math
+import threading
 import time
 
 
@@ -12,6 +13,7 @@ class Route_Command:
         self.vision_override = vision_override_event
         self.imu_reader      = esp
         self.current_index   = 0
+        self.route_paused    = threading.Event()  # Standby seguro tras control manual
 
         self.heading_offset  = None
 
@@ -34,9 +36,24 @@ class Route_Command:
     # ────────────────────────────────────────────────────────────────────────
     def reset_path(self):
         self.current_index = 0
+        self._fused_theta  = None
 
     def set_path(self, path):
         self.path = path
+
+    def pause_route(self):
+        """Pone la navegación autónoma en Standby y detiene el rover."""
+        self.route_paused.set()
+        self.sender.send_route(0, 0)
+        print("[Route_Command] ⏸️ Ruta autónoma en Standby (pausada).")
+
+    def resume_route(self):
+        """Autoriza a follow_path a continuar hacia el waypoint actual desde la pose actual."""
+        if hasattr(self.sender, "manual_override") and self.sender.manual_override.is_set():
+            self.sender.set_manual_mode(False)
+        self._fused_theta = None  # Re-anclar filtro complementario a la orientación actual
+        self.route_paused.clear()
+        print("[Route_Command] ▶️ Reanudando ruta autónoma.")
 
     # ── Filtro Complementario ────────────────────────────────────────────────
     def _fuse_heading(self, odom_theta: float) -> float:
@@ -112,7 +129,23 @@ class Route_Command:
         while self.current_index < len(self.path):
             target_x, target_y = self.path[self.current_index]
 
-            # --- PRIORIDAD DE VISIÓN ---
+            # --- PRIORIDAD 1: CONTROL MANUAL (DualSense) ---
+            if hasattr(self.sender, "manual_override") and self.sender.manual_override.is_set():
+                if not self.route_paused.is_set():
+                    print("[Route_Command] 🎮 Control manual detectado. Ruta pasa a Standby.")
+                    self.route_paused.set()
+                was_tracking = True
+                time.sleep(0.05)
+                continue
+
+            # --- STANDBY TRAS MODO MANUAL (Espera confirmación para reanudar) ---
+            if self.route_paused.is_set():
+                stop()
+                was_tracking = True
+                time.sleep(0.1)
+                continue
+
+            # --- PRIORIDAD 2: VISIÓN ---
             if self.vision_override.is_set():
                 was_tracking = True
                 time.sleep(0.1)
@@ -121,6 +154,7 @@ class Route_Command:
             # --- RECÁLCULO DEL PUNTO MÁS CERCANO tras retomar control ---
             if was_tracking:
                 was_tracking = False
+                self._fused_theta = None  # Re-sincronizar orientación tras control externo
                 stop()          # detener antes de recalcular para evitar inestabilidad
                 current_x, current_y, _ = rover_odometry.pose
                 print("Seguimiento terminado. Calculando el próximo punto más cercano...")
