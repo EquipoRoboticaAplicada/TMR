@@ -1,6 +1,6 @@
 {
   "_comentario": "modelo: G(s) = K*exp(-theta*s)/(tau*s + 1), K en rpm/PWM, tau y theta en s; K = 0 es motor sin identificar. ZM = zona muerta en PWM que el PID se salta (0 = sin compensar). PID en forma ideal u = Kp*[e + (1/Ti)*integral(e) + Td*de/dt], filtro Td/N. Ti = 0 sin integral, Td = 0 sin derivada, N = 0 sin filtro. REF = juego para cambios de referencia (ITAE), PERT = juego contra perturbaciones (IAE); el firmware los mezcla. L = izquierdo (ESP_L), R = derecho (ESP_R). TS y TMEZ en ms, BANDA en rpm, UMAX en PWM.",
-  "config": {"UMAX": 255.0, "TS": 100, "BANDA": 0.5, "TMEZ": 500, "DMODE": "E"},
+  "config": {"UMAX": 255.0, "TS": 50, "BANDA": 0.2, "TMEZ": 500, "DMODE": "PV"},
   "motores": {
     "L0": {"modelo": {"K": 0.0, "tau": 0.0, "theta": 0.0}, "ZM": 0.0,
            "REF":    {"Kp": 0.5, "Ti": 0.5, "Td": 0.0, "N": 10.0},
@@ -11,14 +11,14 @@
     "L2": {"modelo": {"K": 0.0, "tau": 0.0, "theta": 0.0}, "ZM": 0.0,
            "REF":    {"Kp": 0.5, "Ti": 0.5, "Td": 0.0, "N": 10.0},
            "PERT":   {"Kp": 0.5, "Ti": 0.5, "Td": 0.0, "N": 10.0}},
-    "R0": {"modelo": {"K": 0.0, "tau": 0.0, "theta": 0.0}, "ZM": 0.0,
-           "REF":    {"Kp": 0.5, "Ti": 0.5, "Td": 0.0, "N": 10.0},
-           "PERT":   {"Kp": 0.5, "Ti": 0.5, "Td": 0.0, "N": 10.0}},
-    "R1": {"modelo": {"K": 0.0, "tau": 0.0, "theta": 0.0}, "ZM": 0.0,
-           "REF":    {"Kp": 0.5, "Ti": 0.5, "Td": 0.0, "N": 10.0},
-           "PERT":   {"Kp": 0.5, "Ti": 0.5, "Td": 0.0, "N": 10.0}},
-    "R2": {"modelo": {"K": 0.0, "tau": 0.0, "theta": 0.0}, "ZM": 0.0,
-           "REF":    {"Kp": 0.5, "Ti": 0.5, "Td": 0.0, "N": 10.0},
-           "PERT":   {"Kp": 0.5, "Ti": 0.5, "Td": 0.0, "N": 10.0}}
+    "R0": {"modelo": {"K": 0.1421, "tau": 0.0184, "theta": 0.0007}, "ZM": 0.0,
+           "REF":    {"Kp": 1.732, "Ti": 0.0177, "Td": 0.0, "N": 10.0},
+           "PERT":   {"Kp": 7.026, "Ti": 0.0564, "Td": 0.0, "N": 10.0}},
+    "R1": {"modelo": {"K": 0.1469, "tau": 0.0247, "theta": 0.0}, "ZM": 0.0,
+           "REF":    {"Kp": 1.938, "Ti": 0.0207, "Td": 0.0, "N": 10.0},
+           "PERT":   {"Kp": 4.148, "Ti": 0.0346, "Td": 0.0, "N": 10.0}},
+    "R2": {"modelo": {"K": 0.1547, "tau": 0.0209, "theta": 0.0}, "ZM": 0.0,
+           "REF":    {"Kp": 1.761, "Ti": 0.0198, "Td": 0.0, "N": 10.0},
+           "PERT":   {"Kp": 3.037, "Ti": 0.0269, "Td": 0.0, "N": 10.0}}
   }
 }

@@ -65,8 +65,8 @@ const int L_EN[3] = {21, 32, 15};
 // ===========================================================================
 // Secuencia de niveles de PWM. Conviene que el primero no sea 0 para no meter
 // la zona muerta del motor en el modelo.
-const int      NIVELES_DEFECTO[]  = {100, 150, 200, 150, 100};
-const uint32_t T_NIVEL_MS_DEFECTO = 1000;   // duración de cada nivel
+const int      NIVELES_DEFECTO[]  = {25, 50, 75, 100, 125, 150, 175, 200, 225, 250, 225, 200, 175, 150, 125, 100, 75, 50, 25};
+const uint32_t T_NIVEL_MS_DEFECTO = 5000;   // duración de cada nivel
 const uint32_t T_PREVIO_MS        = 1000;   // primer nivel sin registrar (asentamiento)
 const uint32_t TS_MS              = 10;     // tiempo de muestreo
 
@@ -107,7 +107,7 @@ void IRAM_ATTR isrEncoder(void* arg) {
 // ===========================================================================
 //  ESTADO
 // ===========================================================================
-const int      MAX_NIVELES = 16;
+const int      MAX_NIVELES = 20;
 const uint32_t TS_US       = TS_MS * 1000UL;
 
 int      niveles[MAX_NIVELES];
