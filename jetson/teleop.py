@@ -128,6 +128,8 @@ class DualSenseReader:
         self._r2_axis = r2_axis
         self._trigger_calibrated = {}  # axis_idx -> bool (True cuando ya reportó reposo -1.0)
         self._prev_buttons = {}
+        self._prev_keys    = {}
+        self.pump_events   = True      # False cuando el hilo principal ya procesa eventos (RoverViz)
 
     def connect(self) -> bool:
         try:
@@ -144,7 +146,8 @@ class DualSenseReader:
 
         count = self._pygame.joystick.get_count()
         if count == 0:
-            return False
+            print("⌨️  Sin DualSense detectado: Control por TECLADO activo (W/A/S/D o Flechas).")
+            return True
 
         self.joystick = self._pygame.joystick.Joystick(0)
         self.joystick.init()
@@ -158,7 +161,7 @@ class DualSenseReader:
             self._l2_axis = 4 if num_axes >= 6 else 2
             self._r2_axis = 5 if num_axes >= 6 else 3
 
-        print(f"🎮 Control conectado: '{name}' ({num_axes} ejes, {num_btns} botones)")
+        print(f"🎮 Control conectado: '{name}' ({num_axes} ejes, {num_btns} botones) + Teclado activo")
         return True
 
     def _read_trigger(self, axis_idx: int) -> float:
@@ -180,58 +183,102 @@ class DualSenseReader:
 
     def poll(self) -> dict:
         """
-        Lee el estado actual del control y retorna:
+        Lee el estado actual del DualSense (si está conectado) y del Teclado (W/A/S/D + Flechas).
+        Retorna:
           - throttle, steer (para modo arcade)
           - left_tank, right_tank (para modo tanque)
-          - edges de botones presionados en este ciclo
+          - edges de botones/teclas presionados en este ciclo
         """
         if self._pygame is None:
             return {}
 
-        self._pygame.event.pump()
+        if self.pump_events:
+            self._pygame.event.pump()
 
-        if self._pygame.joystick.get_count() == 0:
-            if self.joystick is not None:
-                print("⚠️ Control DualSense desconectado.")
-                self.joystick = None
-            return {"connected": False}
-
-        if self.joystick is None:
-            self.connect()
-            if self.joystick is None:
-                return {"connected": False}
-
-        num_axes = self.joystick.get_numaxes()
-        lx = apply_deadzone(self.joystick.get_axis(0) if num_axes > 0 else 0.0, self.deadzone)
-        ly = apply_deadzone(-self.joystick.get_axis(1) if num_axes > 1 else 0.0, self.deadzone)
-
-        # En DualSense con 6 ejes, el stick derecho vertical suele ser eje 3 (o 4)
-        ry_axis = 3 if num_axes >= 6 else 2
-        ry = apply_deadzone(-self.joystick.get_axis(ry_axis) if num_axes > ry_axis else 0.0, self.deadzone)
-
-        l2 = self._read_trigger(self._l2_axis)
-        r2 = self._read_trigger(self._r2_axis)
-
-        # Si los gatillos se presionan usan R2 - L2; si están sueltos permite usar Stick Izquierdo Y
-        trigger_throttle = r2 - l2
-        if self.drive_mode == "arcade_stick":
-            throttle = ly
-        elif abs(trigger_throttle) > 0.01:
-            throttle = trigger_throttle
-        else:
-            throttle = ly
-
-        steer = lx
-
-        # Detectar flancos de subida (button_down) para acciones discretas
         pressed_edges = set()
-        num_btns = self.joystick.get_numbuttons()
-        for b in range(num_btns):
-            curr = bool(self.joystick.get_button(b))
-            prev = self._prev_buttons.get(b, False)
-            if curr and not prev:
-                pressed_edges.add(b)
-            self._prev_buttons[b] = curr
+        throttle = 0.0
+        steer    = 0.0
+        lx = ly = ry = l2 = r2 = 0.0
+
+        # 1. Lectura de DualSense (si hay joystick conectado)
+        if self._pygame.joystick.get_count() > 0:
+            if self.joystick is None:
+                self.connect()
+            if self.joystick is not None:
+                num_axes = self.joystick.get_numaxes()
+                lx = apply_deadzone(self.joystick.get_axis(0) if num_axes > 0 else 0.0, self.deadzone)
+                ly = apply_deadzone(-self.joystick.get_axis(1) if num_axes > 1 else 0.0, self.deadzone)
+
+                ry_axis = 3 if num_axes >= 6 else 2
+                ry = apply_deadzone(-self.joystick.get_axis(ry_axis) if num_axes > ry_axis else 0.0, self.deadzone)
+
+                l2 = self._read_trigger(self._l2_axis)
+                r2 = self._read_trigger(self._r2_axis)
+
+                trigger_throttle = r2 - l2
+                if self.drive_mode == "arcade_stick":
+                    throttle = ly
+                elif abs(trigger_throttle) > 0.01:
+                    throttle = trigger_throttle
+                else:
+                    throttle = ly
+
+                steer = lx
+
+                num_btns = self.joystick.get_numbuttons()
+                for b in range(num_btns):
+                    curr = bool(self.joystick.get_button(b))
+                    prev = self._prev_buttons.get(b, False)
+                    if curr and not prev:
+                        pressed_edges.add(b)
+                    self._prev_buttons[b] = curr
+        else:
+            if self.joystick is not None:
+                print("⚠️ Control DualSense desconectado (Teclado sigue activo).")
+                self.joystick = None
+
+        # 2. Lectura de Teclado (cuando hay ventana Pygame enfocada)
+        if self._pygame.display.get_init() and self._pygame.display.get_surface() is not None:
+            keys = self._pygame.key.get_pressed()
+            kb_throttle = 0.0
+            kb_steer    = 0.0
+
+            if keys[self._pygame.K_w] or keys[self._pygame.K_UP]:
+                kb_throttle += 1.0
+            if keys[self._pygame.K_s] or keys[self._pygame.K_DOWN]:
+                kb_throttle -= 1.0
+            # En el marco del rover: giro a la derecha es steer > 0, giro a la izquierda es steer < 0
+            if keys[self._pygame.K_d] or keys[self._pygame.K_RIGHT]:
+                kb_steer += 1.0
+            if keys[self._pygame.K_a] or keys[self._pygame.K_LEFT]:
+                kb_steer -= 1.0
+
+            if abs(kb_throttle) > 0.01:
+                throttle = kb_throttle
+                ly = kb_throttle
+            if abs(kb_steer) > 0.01:
+                steer = kb_steer
+                lx = kb_steer
+
+            # Mapear teclas de acción discretas a los mismos códigos de botón del DualSense
+            key_to_btn = {
+                self._pygame.K_SPACE: 1,         # Espacio -> Círculo (Paro de Emergencia)
+                self._pygame.K_e: 1,             # E       -> Círculo (Paro de Emergencia)
+                self._pygame.K_m: 9,             # M       -> Options (Alternar Manual <-> Standby)
+                self._pygame.K_r: 2,             # R       -> Triángulo (Reanudar Ruta Autónoma)
+                self._pygame.K_z: 8,             # Z       -> Share (Resetear Pose 0,0,0)
+                self._pygame.K_b: 0,             # B       -> Cruz (Accionar Brazo)
+                self._pygame.K_LEFTBRACKET: 4,   # [ o -   -> L1 (Bajar MAX_RPM)
+                self._pygame.K_MINUS: 4,
+                self._pygame.K_RIGHTBRACKET: 5,  # ] o =   -> R1 (Subir MAX_RPM)
+                self._pygame.K_EQUALS: 5,
+            }
+            for k_code, btn_id in key_to_btn.items():
+                curr_k = bool(keys[k_code])
+                prev_k = self._prev_keys.get(k_code, False)
+                if curr_k and not prev_k:
+                    pressed_edges.add(btn_id)
+                self._prev_keys[k_code] = curr_k
 
         return {
             "connected": True,
@@ -536,25 +583,71 @@ def run_remote_mqtt(args):
     # Arrancar directamente en modo manual cuando se invoca el cliente remoto
     teleop.set_manual_mode(True)
 
-    print("\n══════════ CONTROLES DUALSENSE (REMOTO MQTT) ══════════")
-    print("  • R2 / L2              : Acelerar adelante / Reversa")
-    print("  • Stick Izquierdo (X)  : Giro diferencial (Izquierda / Derecha)")
-    print("  • Botón Options        : Alternar Modo MANUAL <-> STANDBY")
-    print("  • Botón Triángulo (△)  : Reanudar ruta autónoma por odometría")
-    print("  • Botón Círculo (O)    : PARO DE EMERGENCIA (0 RPM)")
-    print("  • Botón Cruz (X)       : Accionar brazo (B0)")
-    print("  • L1 / R1              : Bajar / Subir límite MAX_RPM")
-    print("═══════════════════════════════════════════════════════\n")
+    # Abrir una pequeña ventana Pygame si no se desactivó con --no-viz para capturar teclado W/A/S/D
+    hud_screen = None
+    hud_font = None
+    if not args.no_viz:
+        try:
+            import pygame
+            pygame.init()
+            hud_screen = pygame.display.set_mode((480, 210))
+            pygame.display.set_caption(f"Teleop MQTT -> {args.broker}:{args.port} (Enfoca para usar Teclado)")
+            hud_font = pygame.font.SysFont("consolas", 15)
+            teleop.reader.pump_events = False
+        except Exception:
+            hud_screen = None
+
+    print("\n══════════ CONTROLES DUALSENSE / TECLADO (REMOTO MQTT) ══════════")
+    print("  • W / S  (o R2 / L2)         : Avanzar adelante / Reversa")
+    print("  • A / D  (o Stick Izq X)     : Giro diferencial (Izquierda / Derecha)")
+    print("  • Tecla M (o Options)        : Alternar Modo MANUAL <-> STANDBY")
+    print("  • Tecla R (o Triángulo △)    : Reanudar ruta autónoma por odometría")
+    print("  • Espacio / E (o Círculo O)  : PARO DE EMERGENCIA (0 RPM)")
+    print("  • Tecla B (o Cruz X)         : Accionar brazo (B0)")
+    print("  • [ / ]  (o L1 / R1)         : Bajar / Subir límite MAX_RPM")
+    print("═════════════════════════════════════════════════════════════════\n")
 
     try:
-        teleop.run_loop()
+        if hud_screen is not None:
+            import pygame
+            teleop.start()
+            running = True
+            while running:
+                for ev in pygame.event.get():
+                    if ev.type == pygame.QUIT:
+                        running = False
+                    elif ev.type == pygame.KEYDOWN and ev.key in (pygame.K_ESCAPE, pygame.K_q):
+                        running = False
+                hud_screen.fill((20, 24, 30))
+                mode_txt = "MODO: MANUAL ACTIVO" if teleop.manual_active else "MODO: STANDBY / RUTA"
+                mode_col = (76, 196, 120) if teleop.manual_active else (255, 193, 7)
+                l_sent, r_sent = teleop._last_sent if teleop._last_sent != (None, None) else (0, 0)
+                lines = [
+                    (mode_txt, mode_col),
+                    (f"ESP_L: {l_sent:+3d} RPM   |   ESP_R: {r_sent:+3d} RPM   |   MAX: {teleop.max_rpm} RPM", (230, 230, 230)),
+                    ("", (0, 0, 0)),
+                    ("W/A/S/D o Flechas : Conducir rover", (170, 180, 195)),
+                    ("M : Manual/Standby | R : Reanudar Ruta | Espacio : PARO", (170, 180, 195)),
+                    ("[ / ] : Ajustar MAX_RPM | B : Brazo | ESC : Salir", (130, 140, 155)),
+                ]
+                for idx, (txt, col) in enumerate(lines):
+                    if txt:
+                        hud_screen.blit(hud_font.render(txt, True, col), (18, 18 + idx * 28))
+                pygame.display.flip()
+                time.sleep(0.03)
+        else:
+            teleop.run_loop()
     except KeyboardInterrupt:
         print("\nCerrando teleoperación remota...")
     finally:
+        teleop.stop()
         teleop.set_manual_mode(False)
         time.sleep(0.1)
         client.loop_stop()
         client.disconnect()
+        if hud_screen is not None:
+            import pygame
+            pygame.quit()
     return 0
 
 
@@ -646,39 +739,67 @@ def run_local_or_sim(args):
         max_rpm=args.max_rpm,
         drive_mode=args.mode,
     )
+    viz = None
+    if not args.no_viz:
+        try:
+            sys.path.insert(0, os.path.join(os.path.dirname(__file__), "test_scripts"))
+            from rover_viz import RoverViz
+            viz = RoverViz(path=square_path, tolerance_m=0.05, track_width_m=odo.L, title="Teleop + Odometría")
+            viz.set_running()
+            teleop.reader.pump_events = False  # El hilo principal procesará eventos de la ventana
+        except Exception as e:
+            print(f"⚠️ Visualizador no disponible ({e}). Corriendo en consola.")
+
     teleop.set_manual_mode(True)
     teleop.start()
 
     # Hilo de ruta autónoma (inicia en Standby porque manual_mode=True)
     threading.Thread(target=rvr_cmd.follow_path, args=(odo,), daemon=True).start()
 
-    viz = None
-    if not args.no_viz:
-        try:
-            sys.path.insert(0, os.path.join(os.path.dirname(__file__), "test_scripts"))
-            from rover_viz import RoverViz
-            viz = RoverViz(path=square_path, tolerance_m=0.05, track_width_m=odo.L)
-        except Exception as e:
-            print(f"⚠️ Visualizador no disponible ({e}). Corriendo en consola.")
-
-    print("\n══════════ TELEOP LOCAL + ODOMETRÍA ACTIVA ══════════")
-    print("  • R2 / L2 + Stick Izq  : Conducir manualmente")
-    print("  • Botón Options        : Alternar MANUAL <-> STANDBY")
-    print("  • Botón Triángulo (△)  : Reanudar ruta cuadrada autónoma")
-    print("  • Botón Círculo (O)    : PARO DE EMERGENCIA")
-    print("═════════════════════════════════════════════════════\n")
+    print("\n══════════ TELEOP LOCAL/SIM + ODOMETRÍA ACTIVA ══════════")
+    print("  • W / A / S / D o Flechas : Conducir manualmente (con la ventana enfocada)")
+    print("  • R2 / L2 + Stick Izq     : Conducir con DualSense (si está conectado)")
+    print("  • Tecla M (o Options)     : Alternar MANUAL <-> STANDBY")
+    print("  • Tecla R (o Triángulo △) : Reanudar ruta cuadrada autónoma")
+    print("  • Espacio / E (o Círculo) : PARO DE EMERGENCIA")
+    print("  • Tecla Z (o Share)       : Reiniciar pose (0,0,0)")
+    print("  • [ / ]   (o L1 / R1)     : Bajar / Subir límite MAX_RPM")
+    print("═════════════════════════════════════════════════════════\n")
 
     try:
-        while True:
+        import pygame
+        running = True
+        while running:
             if viz is not None:
-                if not viz.process_events():
-                    break
+                for ev in pygame.event.get():
+                    if ev.type == pygame.QUIT:
+                        running = False
+                    elif ev.type == pygame.KEYDOWN:
+                        if ev.key in (pygame.K_ESCAPE, pygame.K_q):
+                            running = False
+                        elif ev.key == pygame.K_p:
+                            viz.save_screenshot()
+
+                if teleop.manual_active:
+                    viz.status = f"MANUAL ({teleop.max_rpm} RPM max)"
+                    viz.hint   = "Usa W/A/S/D o Flechas | M: Standby | R: Ruta Autónoma | Espacio: PARO"
+                elif rvr_cmd.route_paused.is_set():
+                    viz.status = "STANDBY (Pausado)"
+                    viz.hint   = "Presiona M para Manual o R para Reanudar Ruta Autónoma"
+                else:
+                    viz.status = "EN RUTA AUTÓNOMA"
+                    viz.hint   = "Siguiendo odometría | Presiona M o Espacio para tomar control"
+
                 viz.update(
                     pose=odo.pose,
                     target_index=rvr_cmd.current_index,
                     velocity=odo.velocity,
                 )
-            time.sleep(0.05)
+                viz.draw()
+                pygame.display.flip()
+                viz.clock.tick(30)
+            else:
+                time.sleep(0.05)
     except KeyboardInterrupt:
         print("\nDeteniendo prueba local...")
     finally:
