@@ -338,7 +338,7 @@ class ESP:
 #COMENAR LA SIGUENTE SECCION (PRUEBAS DE RECEPCION)
 #----------------------------------------------------
 #----------------------------------------------------
-
+""""
 def test_reception(poll_rate_hz: float = 2.0): 
     esp = ESP()
     esp.connect()
@@ -375,3 +375,4 @@ def test_reception(poll_rate_hz: float = 2.0):
 
 if __name__ == "__main__":
     test_reception()
+"""
