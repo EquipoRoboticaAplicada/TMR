@@ -106,20 +106,21 @@ class Route_Command:
 
     # ────────────────────────────────────────────────────────────────────────
     def follow_path(self, rover_odometry):
-        DIST_TOLERANCE  = 0.0   # m   — distancia para considerar que se llegó al punto
-        ANGLE_TOLERANCE = 0.0   # rad — error angular antes de avanzar recto
-        BASE_RPM        = 15
+        DIST_TOLERANCE  = 0.20  # m   — distancia para considerar que se llegó al punto
+        ANGLE_TOLERANCE = 0.15  # rad (~8.6°) — error angular antes de avanzar recto
+        BASE_RPM        = 10
+        TURN_RPM        = 7
 
         def go_forward():
             self.sender.send_route(BASE_RPM, BASE_RPM)
 
         def turn_left():
             # Rueda derecha adelante, rueda izquierda atrás ===> gira a la izquierda
-            self.sender.send_route(-BASE_RPM, BASE_RPM)
+            self.sender.send_route(-TURN_RPM, TURN_RPM)
 
         def turn_right():
             # Rueda izquierda adelante, rueda derecha atrás ===> gira a la derecha
-            self.sender.send_route(BASE_RPM, -BASE_RPM)
+            self.sender.send_route(TURN_RPM, -TURN_RPM)
 
         def stop():
             self.sender.send_route(0, 0)

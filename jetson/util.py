@@ -42,15 +42,20 @@ class ImgProcessorJetson:
         return self
 
     def _run(self):
-        AREA_MIN     = 500
-        APPROACH_RPM = 25
-        Y_TRIGGER    = 0.40
-        Y_HYST       = 0.35
+        AREA_MIN           = 500
+        APPROACH_RPM       = 8
+        STEER_GAIN_RPM     = 4
+        MIN_TURN_RPM       = 4
+        MAX_TURN_RPM       = 8
+        Y_TRIGGER          = 0.40
+        Y_HYST             = 0.35
+        DEADBAND_RATIO     = 0.08   # ~51 px en VGA (640 px)
+        N_CENTERED         = 5      # frames consecutivos centrado antes de accionar brazo
         COMMAND_SEND_EVERY = 2
 
         mode_rotate          = False
-        left_rpm = right_rpm = APPROACH_RPM
-        dir_left = dir_right = 1
+        left_rpm = right_rpm = 0
+        centered_count       = 0
         command_send_counter = 0
 
         while not self.stop_event.is_set():
@@ -58,8 +63,11 @@ class ImgProcessorJetson:
             if self._sender is not None and self._sender.manual_override.is_set():
                 if self._tracking:
                     self._tracking = False
+                    mode_rotate    = False
                     self.vision_override.clear()
                 self._seen_count = 0
+                self._lost_count = 0
+                centered_count   = 0
                 time.sleep(0.05)
                 continue
 
@@ -86,36 +94,76 @@ class ImgProcessorJetson:
             # Transiciones de tracking
             if (not self._tracking) and (self._seen_count >= self.N_ENTER):
                 self._tracking = True
+                centered_count = 0
                 self.vision_override.set()
 
             elif self._tracking and (self._lost_count >= self.N_EXIT):
                 self._tracking = False
                 mode_rotate    = False
+                centered_count = 0
+                self._sender.send_vision(0, 0)
                 self.vision_override.clear()
 
             # Lógica de control (solo durante tracking)
             if self._tracking:
 
-                if detected and frame_w and frame_h:
+                if (detected and frame_w and frame_h
+                        and cx is not None and cy is not None):
 
-                    turn = calc_turn_x(cx, frame_w)
+                    deadband_px = max(20, int(frame_w * DEADBAND_RATIO))
+                    turn = calc_turn_x(cx, frame_w, deadband_px=deadband_px)
 
-                    # Si el objeto está centrado
-                    if turn == 0.0:
+                    # Transición entre acercamiento y centrado final según posición vertical
+                    if (not mode_rotate) and (cy >= frame_h * Y_TRIGGER):
+                        mode_rotate = True
+                    elif mode_rotate and (cy < frame_h * Y_HYST):
+                        mode_rotate    = False
+                        centered_count = 0
 
-                        self._sender.send_vision(0)
+                    if mode_rotate:
+                        if turn == 0.0:
+                            left_rpm = right_rpm = 0
+                            centered_count += 1
+                            self._sender.send_vision(0, 0)
+                            command_send_counter = 0
 
-                        self._sender.esp.act_arm()
-                        self._sender.esp.wait_for_peso_change()
+                            if centered_count >= N_CENTERED:
+                                self._sender.esp.act_arm()
+                                self._sender.esp.wait_for_peso_change()
+                                centered_count = 0
+                        else:
+                            centered_count = 0
+                            rot = int(round(
+                                MIN_TURN_RPM + (MAX_TURN_RPM - MIN_TURN_RPM) * abs(turn)
+                            ))
+                            if turn > 0:
+                                # Objeto a la derecha -> girar a la derecha (L+, R-)
+                                left_rpm, right_rpm = rot, -rot
+                            else:
+                                # Objeto a la izquierda -> girar a la izquierda (L-, R+)
+                                left_rpm, right_rpm = -rot, rot
 
+                            command_send_counter += 1
+                            if command_send_counter >= COMMAND_SEND_EVERY:
+                                self._sender.send_vision(left_rpm, right_rpm)
+                                command_send_counter = 0
                     else:
-                        # No podemos girar con una sola velocidad.
-                        # Por seguridad, detenemos el rover.
-                        self._sender.send_vision(0)
+                        # Modo acercamiento: avanzar corrigiendo rumbo de forma diferencial
+                        centered_count = 0
+                        steer_delta = int(round(turn * STEER_GAIN_RPM))
+                        left_rpm    = APPROACH_RPM + steer_delta
+                        right_rpm   = APPROACH_RPM - steer_delta
+
+                        command_send_counter += 1
+                        if command_send_counter >= COMMAND_SEND_EVERY:
+                            self._sender.send_vision(left_rpm, right_rpm)
+                            command_send_counter = 0
 
                 else:
                     # Si se pierde temporalmente el objeto, detenerse
-                    self._sender.send_vision(0)
+                    centered_count = 0
+                    self._sender.send_vision(0, 0)
+                    command_send_counter = 0
 
             time.sleep(0.01)
 
@@ -227,16 +275,19 @@ class SenderJetson:
         except Exception as e:
             print(f"[SenderJetson] Error en emergency_stop: {e}")
 
-    def send_vision(self, rpm):
+    def send_vision(self, left_rpm: int, right_rpm: int = None):
         """
-        Comando de vision: mismo RPM para ambos lados.
-        El valor se pasa como string a send_uart, que agrega el prefijo S.
+        Comando de vision con control diferencial (Skid-Steer).
+        Si solo se pasa un argumento, se aplica a ambos lados por compatibilidad.
+        left_rpm / right_rpm con signo: positivo = adelante, negativo = atras.
         """
-        rpm = max(-self.MAX_RPM, min(int(rpm), self.MAX_RPM))
-        val = str(rpm)
+        if right_rpm is None:
+            right_rpm = left_rpm
+        left_rpm  = max(-self.MAX_RPM, min(int(left_rpm),  self.MAX_RPM))
+        right_rpm = max(-self.MAX_RPM, min(int(right_rpm), self.MAX_RPM))
         with self.lock:
             if not self.manual_override.is_set():
-                self.latest_vision = (val, val)
+                self.latest_vision = (str(left_rpm), str(right_rpm))
 
     def send_route(self, left_rpm: int, right_rpm: int):
         """
